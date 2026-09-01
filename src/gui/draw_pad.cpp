@@ -47,11 +47,28 @@ struct Layout {
 };
 
 // Control geometry, in design units.
-const float kLeftStickX  = 185.0f, kLeftStickY  = 160.0f, kStickR = 44.0f;
-const float kRightStickX = 375.0f, kRightStickY = 248.0f;
-const float kDpadX       = 255.0f, kDpadY       = 248.0f;
+//
+// The vertical bands, top to bottom, none of which may overlap:
+//
+//     12 ..  52   triggers
+//     60 ..  92   shoulders
+//    100 .. 330   body
+//      106 .. 146   Y          (kFaceY - kFaceOff -/+ kFaceR)
+//      124 .. 212   left stick
+//      152 .. 188   Back / Guide / Start
+//      198 .. 238   A
+//      216 .. 320   d-pad
+//      224 .. 312   right stick
+//    210 .. 390   grips
+//
+// Changing any of kFaceY, kFaceOff, kFaceR or the shoulder band means
+// re-checking that list. The shoulders once sat at 74..92 against a Y button
+// whose top edge was 94, and the two drew straight through each other.
+const float kLeftStickX  = 185.0f, kLeftStickY  = 168.0f, kStickR = 44.0f;
+const float kRightStickX = 375.0f, kRightStickY = 268.0f;
+const float kDpadX       = 255.0f, kDpadY       = 268.0f;
 const float kDpadArm     =  52.0f, kDpadThick   =  24.0f;
-const float kFaceX       = 470.0f, kFaceY       = 160.0f;
+const float kFaceX       = 470.0f, kFaceY       = 172.0f;
 const float kFaceOff     =  46.0f, kFaceR       =  20.0f;
 
 // A click inside a stick past this fraction of its radius means the stick
@@ -185,6 +202,8 @@ const char* XButtonPrompt(int slot) {
 // The pad
 // ---------------------------------------------------------------------------
 
+float PadAspectRatio() { return kDesignW / kDesignH; }
+
 PadHit DrawVirtualPad(const PadView& view, const Deadzone& dz,
                       PadControl highlightKind, int highlightIndex,
                       float width) {
@@ -275,10 +294,10 @@ PadHit DrawVirtualPad(const PadView& view, const Deadzone& dz,
     }
 
     // Shoulders and triggers.
-    const ImVec2 lbA = lay.P(112,  74), lbB = lay.P(238, 106);
-    const ImVec2 rbA = lay.P(402,  74), rbB = lay.P(528, 106);
-    const ImVec2 ltA = lay.P(112,  18), ltB = lay.P(238,  64);
-    const ImVec2 rtA = lay.P(402,  18), rtB = lay.P(528,  64);
+    const ImVec2 lbA = lay.P(112, 60), lbB = lay.P(238, 92);
+    const ImVec2 rbA = lay.P(402, 60), rbB = lay.P(528, 92);
+    const ImVec2 ltA = lay.P(112, 12), ltB = lay.P(238, 52);
+    const ImVec2 rtA = lay.P(402, 12), rtB = lay.P(528, 52);
 
     const Hot hLb = Zone("##lb", lbA, lbB); Record(hit, hLb, PadControl::Button, XB_LeftShoulder);
     const Hot hRb = Zone("##rb", rbA, rbB); Record(hit, hRb, PadControl::Button, XB_RightShoulder);
@@ -286,7 +305,7 @@ PadHit DrawVirtualPad(const PadView& view, const Deadzone& dz,
     const Hot hRt = Zone("##rt", rtA, rtB); Record(hit, hRt, PadControl::Axis,   XA_RightTrigger);
 
     // Centre cluster.
-    const ImVec2 backC = lay.P(288, 158), startC = lay.P(352, 158), guideC = lay.P(320, 208);
+    const ImVec2 backC = lay.P(275, 170), startC = lay.P(365, 170), guideC = lay.P(320, 170);
     const float  smallR = 13.0f * s, guideR = 18.0f * s;
 
     const Hot hBack  = Zone("##back",  ImVec2(backC.x - smallR, backC.y - smallR),
@@ -304,9 +323,9 @@ PadHit DrawVirtualPad(const PadView& view, const Deadzone& dz,
     // They are deliberately not outlined: an outline on each would draw the
     // seams where they overlap, and the fill alone separates the body from the
     // background perfectly well.
-    dl->AddRectFilled(lay.P( 80,  95), lay.P(560, 300), kBodyFill, 56.0f * s);
-    dl->AddRectFilled(lay.P( 98, 190), lay.P(238, 380), kBodyFill, 66.0f * s);
-    dl->AddRectFilled(lay.P(402, 190), lay.P(542, 380), kBodyFill, 66.0f * s);
+    dl->AddRectFilled(lay.P( 80, 100), lay.P(560, 330), kBodyFill, 56.0f * s);
+    dl->AddRectFilled(lay.P( 98, 210), lay.P(238, 390), kBodyFill, 66.0f * s);
+    dl->AddRectFilled(lay.P(402, 210), lay.P(542, 390), kBodyFill, 66.0f * s);
 
     // ---- triggers ----------------------------------------------------------
     struct Trig { ImVec2 a, b; const char* label; float value; bool cap, hov; int slot; };
@@ -474,11 +493,12 @@ PadHit DrawVirtualPad(const PadView& view, const Deadzone& dz,
                capB(sm.slot), sm.hov, s);
     }
 
-    CenteredText(dl, lay.P(288, 186), "Back",  kLabelDim, 0.75f);
-    CenteredText(dl, lay.P(352, 186), "Start", kLabelDim, 0.75f);
+    CenteredText(dl, lay.P(275, 196), "Back",  kLabelDim, 0.75f);
+    CenteredText(dl, lay.P(365, 196), "Start", kLabelDim, 0.75f);
 
     if (!live) {
-        CenteredText(dl, lay.P(320, 60), "no device selected", kLabelDim, 1.0f);
+        // Below the body, between the grips, where nothing else is drawn.
+        CenteredText(dl, lay.P(320, 360), "no device selected", kLabelDim, 1.0f);
     }
 
     ImGui::SetCursorScreenPos(ImVec2(lay.origin.x, canvasEnd.y));

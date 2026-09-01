@@ -35,8 +35,14 @@ struct PadView {
     }
 };
 
+// Width divided by height. The pad is drawn from a fixed design space, so the
+// caller can use this to pick a width that also fits the height available
+// rather than overflowing and scrolling.
+float PadAspectRatio();
+
 // Draws the virtual Xbox pad at the current cursor position, `width` wide, and
-// returns whatever control the user clicked.
+// returns whatever control the user clicked. Height follows from the aspect
+// ratio; the drawing never squashes to fit.
 //
 // `highlightKind`/`highlightIndex` mark the control currently being captured,
 // which pulses so it is obvious what the app is waiting for.

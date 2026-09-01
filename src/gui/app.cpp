@@ -413,12 +413,18 @@ void App::DrawCaptureBanner() {
     // Always the same height, whether or not a capture is running. If this grew
     // when a capture started, clicking a control would shift every other
     // control out from under the cursor.
-    const bool  busy = !queue_.empty();
-    const float h    = ImGui::GetFrameHeight() * 2.4f;
+    const bool busy = !queue_.empty();
+
+    // Sized from what it actually holds - two lines and the child's own padding
+    // - rather than from a multiple of the frame height, which was a guess and
+    // came out just short enough to give the banner a scrollbar of its own.
+    const float h = ImGui::GetTextLineHeightWithSpacing() * 2.0f +
+                    ImGui::GetStyle().WindowPadding.y * 2.0f;
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, busy ? ImVec4(0.16f, 0.20f, 0.28f, 1.0f)
                                                  : ImVec4(0.13f, 0.13f, 0.15f, 1.0f));
-    ImGui::BeginChild("##capture", ImVec2(0, h), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("##capture", ImVec2(0, h), ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
     if (!busy) {
         ImGui::TextDisabled("Click a control on the pad to bind it.");
@@ -464,14 +470,37 @@ void App::DrawPadTab() {
 
     const float padWidth = ImGui::GetContentRegionAvail().x * 0.58f;
 
+    // Scrolling is left enabled here on purpose. The pad is sized to fit, so it
+    // normally never scrolls, but below roughly 200px of height the pad hits its
+    // minimum size and the save bar would otherwise become unreachable.
     ImGui::BeginChild("##padcol", ImVec2(padWidth, 0));
     DrawCaptureBanner();
+
+    // Fit the pad to the space left over, not just to the width. Taking the
+    // full width made a wide window produce a pad taller than the column, which
+    // then scrolled - so the bottom of the controller, and the buttons under
+    // it, dropped out of sight.
+    const float reserve = ImGui::GetFrameHeightWithSpacing() * 4.2f;
+    const float availW  = ImGui::GetContentRegionAvail().x;
+    const float availH  = ImGui::GetContentRegionAvail().y - reserve;
+
+    float padW = availW;
+    if (availH > 0.0f) {
+        const float byHeight = availH * PadAspectRatio();
+        if (byHeight < padW) padW = byHeight;
+    }
+    if (padW < 320.0f) padW = 320.0f;   // below this it is unreadable anyway
+
+    const float indent = (availW - padW) * 0.5f;
+    if (indent > 0.0f) ImGui::Indent(indent);
 
     const PadHit hit = DrawVirtualPad(
         view_, profile_.dz,
         queue_.empty() ? PadControl::None : queue_.front().kind,
         queue_.empty() ? -1 : queue_.front().index,
-        ImGui::GetContentRegionAvail().x);
+        padW);
+
+    if (indent > 0.0f) ImGui::Unindent(indent);
 
     if (hit.Any()) {
         if (hit.clear) {
