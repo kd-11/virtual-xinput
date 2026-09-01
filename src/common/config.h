@@ -130,4 +130,10 @@ bool ParseAxisSpec(const std::string& spec, AxisMapping& out);
 // Parses one button spec, e.g. "3", "none", "axis:z+@0.5", "pov0:up".
 bool ParseButtonSpec(const std::string& spec, ButtonMapping& out);
 
+// The exact inverse of the two parsers above. Kept beside them so a change to
+// the syntax cannot be made on one side only, and used both to write config
+// files and to show a mapping in the configurators.
+std::string AxisSpecString(const AxisMapping& m);
+std::string ButtonSpecString(const ButtonMapping& m);
+
 } // namespace vx

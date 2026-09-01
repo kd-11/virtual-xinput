@@ -1,6 +1,8 @@
 # Spec: GUI configurator
 
-Status: **draft, not implemented.** This describes work not yet started.
+Status: **phases 1–3 built, 4–6 outstanding.** The window, the live pad
+preview and click-to-bind are in `src/gui/`. Profiles, the Games tab and saving
+from the GUI are not. See *Phases* at the end for what is left.
 
 The console configurator works and will stay. What it cannot do well is show
 you a control moving while you decide what to bind it to — and that is most of
@@ -262,6 +264,12 @@ passing.
 - **Two front-ends drifting.** Mitigated by putting every rule in `vx_common`,
   but it needs watching — the first time a fix lands in one and not the other,
   the console app should probably be reduced to install/uninstall only.
+
+  Acted on during phase 3. The detection thresholds, the rest-position sampling
+  and the three `*FromDetection` inferences were living in the console app's
+  anonymous namespace, and the spec-string emitters were the only half of the
+  config syntax not sitting beside its parser. Both moved into `vx_common`
+  (`detect.h`, `config.h`) before the GUI could grow a second copy of either.
 - **Comment-preserving YAML round-trip.** Likely the fiddliest piece. The
   fallback — warn before rewriting a file we did not generate — is acceptable
   and should be taken early rather than late.
@@ -270,18 +278,22 @@ passing.
 
 ## Phases
 
-1. **Window and monitor.** ImGui vendored, target building in both
-   architectures, device enumeration, the raw-device panel. Proves the toolkit
-   choice before anything is built on it.
-2. **Pad preview.** The drawn controller, live, driven by `MapState`.
-3. **Binding.** Click-to-capture, resting-position inference, auto-detect
-   reset, deadzone rings as live editors.
+1. ~~**Window and monitor.**~~ **Done.** ImGui vendored at v1.92.9, both
+   architectures building, device enumeration with a hot-plug rescan, the
+   raw-device panel.
+2. ~~**Pad preview.**~~ **Done.** The drawn controller, live, driven by the same
+   `MapState` the DLL uses.
+3. ~~**Binding.**~~ **Done.** Click-to-capture with a queue, resting-position
+   inference shared with the console wizard, auto-detect reset, deadzone rings
+   drawn over the live dots.
 4. **Profiles.** The store, the default profile, the Profiles tab.
 5. **Games.** Profile assignment, install-writes-config, divergence detection.
 6. **Polish.** Store/UWP and permission warnings, FF test, README.
 
-Phases 1–3 are usable on their own: they replace the wizard and the monitor,
-which is the bulk of the console app's value.
+Phase 4 is next. Until it lands the GUI can derive a mapping but not save one,
+so the console app is still needed to write a config file — which is the main
+thing that currently keeps both front-ends necessary rather than merely
+available.
 
 ## Decisions needing sign-off
 

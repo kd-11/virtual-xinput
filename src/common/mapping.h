@@ -43,6 +43,12 @@ void BuildAutoProfile(const DeviceCaps& caps, DeviceProfile& profile);
 // Translates one poll into an XInput gamepad, applying deadzones.
 void MapState(const DeviceProfile& profile, const RawState& raw, XINPUT_GAMEPAD& out);
 
+// Resolves the axis mappings to their values *before* deadzones are applied:
+// sticks as -1..1, triggers as 0..1. The pad preview draws these alongside the
+// deadzoned output, so what a deadzone is doing can be seen rather than
+// inferred from a stick that mysteriously ignores small movements.
+void ReadAxesRaw(const DeviceProfile& profile, const RawState& raw, float out[XA_Count]);
+
 // Converts a POV reading into D-pad direction bits.
 WORD PovToMask(int pov);
 

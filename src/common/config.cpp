@@ -420,4 +420,47 @@ Config ConfigLoad(const std::wstring& moduleDir, const std::wstring& exeDir) {
     return cfg;
 }
 
+std::string AxisSpecString(const AxisMapping& m) {
+    if (m.kind == AxisMapping::Kind::Button) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "button:%d", m.button);
+        return buf;
+    }
+    if (m.kind != AxisMapping::Kind::Axis) return "none";
+
+    std::string s;
+    if (m.invert) s += "-";
+    s += DiAxisName(m.axis);
+    if (m.half == AxisHalf::Positive) s += "+";
+    if (m.half == AxisHalf::Negative) s += "-";
+    return s;
+}
+
+std::string ButtonSpecString(const ButtonMapping& m) {
+    char buf[64];
+    switch (m.kind) {
+        case ButtonMapping::Kind::Button:
+            snprintf(buf, sizeof(buf), "%d", m.button);
+            return buf;
+        case ButtonMapping::Kind::Pov: {
+            const char* dir = "up";
+            switch (m.povMask) {
+                case VX_GAMEPAD_DPAD_UP:    dir = "up";    break;
+                case VX_GAMEPAD_DPAD_DOWN:  dir = "down";  break;
+                case VX_GAMEPAD_DPAD_LEFT:  dir = "left";  break;
+                case VX_GAMEPAD_DPAD_RIGHT: dir = "right"; break;
+                default: break;
+            }
+            snprintf(buf, sizeof(buf), "pov%d:%s", m.pov, dir);
+            return buf;
+        }
+        case ButtonMapping::Kind::Axis:
+            snprintf(buf, sizeof(buf), "axis:%s%s@%.2f", DiAxisName(m.axis),
+                     m.axisPositive ? "+" : "-", m.axisThreshold);
+            return buf;
+        default:
+            return "none";
+    }
+}
+
 } // namespace vx

@@ -5,6 +5,7 @@
 // user to press each control in turn.
 
 #include "../common/config.h"
+#include "../common/detect.h"
 #include "../common/di_device.h"
 #include "../common/games.h"
 #include "../common/mapping.h"
@@ -22,12 +23,6 @@
 using namespace vx;
 
 namespace {
-
-// An axis must move by at least this much from rest before it counts as a
-// deliberate movement rather than noise or drift.
-const float kMoveThreshold    = 0.45f;
-// Everything must fall back inside this band before the next prompt is taken.
-const float kReleaseThreshold = 0.20f;
 
 const char* kAxisPromptLabel[XA_Count] = {
     "LEFT stick  ->  push RIGHT",
@@ -113,49 +108,21 @@ std::string Bar(float v, int width) {
 
 // ---------------------------------------------------------------------------
 // Learn-mode input detection
+//
+// The inference itself lives in vx_common/detect.h so that the windowed
+// configurator makes exactly the same decisions. This is only the console's
+// way of driving it: block, sleep, and watch the keyboard for skip/abort.
 // ---------------------------------------------------------------------------
-
-struct Detection {
-    enum Kind { None, Axis, Button, Pov } kind;
-    int   axisIndex;
-    float baseline;
-    float value;
-    int   button;
-    int   pov;
-    int   povValue;
-
-    Detection()
-        : kind(None), axisIndex(-1), baseline(0), value(0), button(-1), pov(-1), povValue(-1) {}
-};
-
-bool StateIsNeutral(const RawState& cur, const RawState& base, const DeviceCaps& caps) {
-    for (int i = 0; i < caps.buttonCount; ++i)
-        if (cur.button[i] != base.button[i]) return false;
-    for (int i = 0; i < caps.povCount; ++i)
-        if (cur.pov[i] != base.pov[i]) return false;
-    for (int i = 0; i < kAxisCount; ++i) {
-        if (!caps.axisPresent[i]) continue;
-        float d = cur.axis[i] - base.axis[i];
-        if (d < 0) d = -d;
-        if (d > kReleaseThreshold) return false;
-    }
-    return true;
-}
 
 enum WaitResult { Wait_Detected, Wait_Skipped, Wait_Aborted };
 
 WaitResult WaitForInput(DiDevice* dev, DiSystem& di, Detection& out) {
-    // Rest position, sampled once the user has stopped touching the pad.
-    RawState base;
-    for (int i = 0; i < 25; ++i) {
-        dev->Poll(base);
-        di.PumpMessages();
-        Sleep(10);
-    }
+    InputDetector det;
+    det.Begin(dev->Caps());
 
-    const DeviceCaps& caps = dev->Caps();
+    bool announcedRelease = false;
 
-    for (;;) {
+    while (det.IsActive()) {
         if (_kbhit()) {
             int c = _getch();
             if (c == 's' || c == 'S') return Wait_Skipped;
@@ -163,172 +130,33 @@ WaitResult WaitForInput(DiDevice* dev, DiSystem& di, Detection& out) {
         }
 
         RawState cur;
-        if (!dev->Poll(cur)) { di.PumpMessages(); Sleep(8); continue; }
+        const bool polled = dev->Poll(cur);
+        det.Feed(cur, polled);
 
-        Detection found;
-
-        for (int i = 0; i < caps.buttonCount && found.kind == Detection::None; ++i) {
-            if (cur.button[i] && !base.button[i]) {
-                found.kind   = Detection::Button;
-                found.button = i;
-            }
-        }
-
-        for (int i = 0; i < caps.povCount && found.kind == Detection::None; ++i) {
-            if (cur.pov[i] >= 0 && base.pov[i] < 0) {
-                found.kind     = Detection::Pov;
-                found.pov      = i;
-                found.povValue = cur.pov[i];
-            }
-        }
-
-        if (found.kind == Detection::None) {
-            // Largest deflection wins, so a stick that also nudges a
-            // neighbouring axis still resolves to the axis actually pushed.
-            float best = kMoveThreshold;
-            for (int i = 0; i < kAxisCount; ++i) {
-                if (!caps.axisPresent[i]) continue;
-                float d   = cur.axis[i] - base.axis[i];
-                float mag = d < 0 ? -d : d;
-                if (mag > best) {
-                    best           = mag;
-                    found.kind     = Detection::Axis;
-                    found.axisIndex = i;
-                    found.baseline = base.axis[i];
-                    found.value    = cur.axis[i];
-                }
-            }
-        }
-
-        if (found.kind != Detection::None) {
-            out = found;
-            // Let go before the next prompt, otherwise the release would be
-            // read as the answer to it.
+        // Let go before the next prompt, otherwise the release would be read
+        // as the answer to it.
+        if (!announcedRelease && det.CurrentPhase() == InputDetector::Phase::Releasing) {
+            announcedRelease = true;
             printf("   ... release to continue\r");
             fflush(stdout);
-            for (;;) {
-                RawState after;
-                if (dev->Poll(after) && StateIsNeutral(after, base, caps)) break;
-                di.PumpMessages();
-                Sleep(15);
-            }
-            printf("%-60s\r", "");
-            return Wait_Detected;
         }
 
         di.PumpMessages();
-        Sleep(8);
+        Sleep(det.CurrentPhase() == InputDetector::Phase::Sampling ? 10 : 8);
     }
-}
 
-// Turns a detected stick movement into a mapping. XInput's positive direction
-// is right and up, so an axis that moved negative gets inverted.
-AxisMapping AxisFromDetection(const Detection& d) {
-    AxisMapping m;
-    if (d.kind == Detection::Button) {
-        m.kind   = AxisMapping::Kind::Button;
-        m.button = d.button;
-        return m;
-    }
-    if (d.kind != Detection::Axis) return m;
-
-    m.kind   = AxisMapping::Kind::Axis;
-    m.axis   = (DiAxis)d.axisIndex;
-    m.invert = (d.value < d.baseline);
-    return m;
-}
-
-// Triggers need more care than sticks: the same physical trigger may be a full
-// axis resting at one end, or half of an axis that rests centred and is shared
-// with the other trigger.
-AxisMapping TriggerFromDetection(const Detection& d) {
-    AxisMapping m;
-    if (d.kind == Detection::Button) {
-        m.kind   = AxisMapping::Kind::Button;
-        m.button = d.button;
-        return m;
-    }
-    if (d.kind != Detection::Axis) return m;
-
-    m.kind = AxisMapping::Kind::Axis;
-    m.axis = (DiAxis)d.axisIndex;
-
-    bool restsAtEnd = (d.baseline < -0.6f) || (d.baseline > 0.6f);
-    if (restsAtEnd) {
-        m.half   = AxisHalf::Full;
-        m.invert = (d.baseline > 0.6f);   // rests high, so the travel is downward
-    } else {
-        // Rests near centre: this trigger owns one half of the axis.
-        m.half   = (d.value > d.baseline) ? AxisHalf::Positive : AxisHalf::Negative;
-        m.invert = false;
-    }
-    return m;
-}
-
-ButtonMapping ButtonFromDetection(const Detection& d) {
-    ButtonMapping m;
-    if (d.kind == Detection::Button) {
-        m.kind   = ButtonMapping::Kind::Button;
-        m.button = d.button;
-    } else if (d.kind == Detection::Pov) {
-        m.kind    = ButtonMapping::Kind::Pov;
-        m.pov     = d.pov;
-        m.povMask = PovToMask(d.povValue);
-    } else if (d.kind == Detection::Axis) {
-        m.kind          = ButtonMapping::Kind::Axis;
-        m.axis          = (DiAxis)d.axisIndex;
-        m.axisPositive  = (d.value > d.baseline);
-        m.axisThreshold = 0.5f;
-    }
-    return m;
+    if (announcedRelease) printf("%-60s\r", "");
+    out = det.Result();
+    return Wait_Detected;
 }
 
 // ---------------------------------------------------------------------------
 // YAML emission
+//
+// The spec strings themselves are produced by vx_common, next to the parser
+// that reads them back, so the two can never disagree about the syntax.
 // ---------------------------------------------------------------------------
 
-std::string AxisSpecString(const AxisMapping& m) {
-    if (m.kind == AxisMapping::Kind::Button) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "button:%d", m.button);
-        return buf;
-    }
-    if (m.kind != AxisMapping::Kind::Axis) return "none";
-
-    std::string s;
-    if (m.invert) s += "-";
-    s += DiAxisName(m.axis);
-    if (m.half == AxisHalf::Positive) s += "+";
-    if (m.half == AxisHalf::Negative) s += "-";
-    return s;
-}
-
-std::string ButtonSpecString(const ButtonMapping& m) {
-    char buf[64];
-    switch (m.kind) {
-        case ButtonMapping::Kind::Button:
-            snprintf(buf, sizeof(buf), "%d", m.button);
-            return buf;
-        case ButtonMapping::Kind::Pov: {
-            const char* dir = "up";
-            switch (m.povMask) {
-                case VX_GAMEPAD_DPAD_UP:    dir = "up";    break;
-                case VX_GAMEPAD_DPAD_DOWN:  dir = "down";  break;
-                case VX_GAMEPAD_DPAD_LEFT:  dir = "left";  break;
-                case VX_GAMEPAD_DPAD_RIGHT: dir = "right"; break;
-                default: break;
-            }
-            snprintf(buf, sizeof(buf), "pov%d:%s", m.pov, dir);
-            return buf;
-        }
-        case ButtonMapping::Kind::Axis:
-            snprintf(buf, sizeof(buf), "axis:%s%s@%.2f", DiAxisName(m.axis),
-                     m.axisPositive ? "+" : "-", m.axisThreshold);
-            return buf;
-        default:
-            return "none";
-    }
-}
 
 bool WriteConfig(const std::wstring& path, const DeviceInfo& info, const DeviceProfile& p) {
     FILE* f = nullptr;

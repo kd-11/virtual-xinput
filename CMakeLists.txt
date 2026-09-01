@@ -17,6 +17,7 @@ option(VX_BUILD_ALIASES
        "Also build xinput1_1/1_2/1_4/9_1_0.dll for games that load those versions"
        OFF)
 option(VX_BUILD_TESTS "Build the test executables" ON)
+option(VX_BUILD_GUI   "Build the windowed configurator (needs Direct3D 11)" ON)
 
 add_compile_options(/W4 /permissive-)
 add_compile_definitions(
@@ -38,6 +39,7 @@ endif()
 # ---------------------------------------------------------------------------
 add_library(vx_common STATIC
     src/common/config.cpp
+    src/common/detect.cpp
     src/common/di_device.cpp
     src/common/games.cpp
     src/common/log.cpp
@@ -83,10 +85,54 @@ if(VX_BUILD_ALIASES)
 endif()
 
 # ---------------------------------------------------------------------------
-# Configurator
+# Console configurator
 # ---------------------------------------------------------------------------
 add_executable(virtual-xinput-config src/configurator/main.cpp)
 target_link_libraries(virtual-xinput-config PRIVATE vx_common)
+
+# ---------------------------------------------------------------------------
+# Windowed configurator
+#
+# Dear ImGui is vendored under third_party/imgui; see VENDORING.md there. It is
+# a separate target purely so the project's /W4 does not apply to it - upstream
+# is warning-clean at its own settings, not at ours, and patching it would make
+# updating painful.
+# ---------------------------------------------------------------------------
+if(VX_BUILD_GUI)
+    set(VX_IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
+
+    add_library(vx_imgui STATIC
+        ${VX_IMGUI_DIR}/imgui.cpp
+        ${VX_IMGUI_DIR}/imgui_draw.cpp
+        ${VX_IMGUI_DIR}/imgui_tables.cpp
+        ${VX_IMGUI_DIR}/imgui_widgets.cpp
+        ${VX_IMGUI_DIR}/backends/imgui_impl_win32.cpp
+        ${VX_IMGUI_DIR}/backends/imgui_impl_dx11.cpp
+    )
+    target_include_directories(vx_imgui PUBLIC ${VX_IMGUI_DIR} ${VX_IMGUI_DIR}/backends)
+    target_compile_options(vx_imgui PRIVATE /W0)
+
+    # imgui_impl_win32.cpp LoadLibrary's xinput1_4.dll, then xinput1_3.dll, and
+    # so on, to drive gamepad UI navigation. Those are the names this project
+    # builds: run the GUI from a folder holding our wrapper and ImGui would load
+    # it, standing up a second DirectInput stack inside the configurator that
+    # polls the very pads the configurator is already reading. It would also let
+    # the pad being configured move the UI focus while you configure it.
+    target_compile_definitions(vx_imgui PUBLIC IMGUI_IMPL_WIN32_DISABLE_GAMEPAD)
+
+    # d3dcompiler, gdi32 and dwmapi arrive through #pragma comment(lib) in the
+    # backends themselves.
+    target_link_libraries(vx_imgui PUBLIC d3d11 dxgi)
+
+    add_executable(virtual-xinput-gui WIN32
+        src/gui/main.cpp
+        src/gui/platform.cpp
+        src/gui/app.cpp
+        src/gui/draw_pad.cpp
+    )
+    target_link_libraries(virtual-xinput-gui PRIVATE vx_common vx_imgui)
+    install(PROGRAMS $<TARGET_FILE:virtual-xinput-gui> DESTINATION .)
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -109,6 +155,7 @@ endif()
 # Install layout
 #
 #   dist/
+#     virtual-xinput-gui.exe       the windowed configurator
 #     virtual-xinput-config.exe    run from anywhere; keeps games.yml beside it
 #     virtual-xinput.yml           reference config
 #     README.md

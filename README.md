@@ -16,7 +16,9 @@ dist\virtual-xinput-config.exe add "C:\Games\Some Old Game"
 dist\virtual-xinput-config.exe install 0
 ```
 
-Or run `dist\virtual-xinput-config.exe` with no arguments and use the menu.
+Or run `dist\virtual-xinput-gui.exe` and work it out by looking at it. Both
+configurators do the same job; the windowed one shows the pad moving while you
+map it.
 
 To do it by hand instead: copy `dist\x86\xinput1_3.dll` next to the game's
 `.exe` — the **32-bit** build for a 32-bit game, **64-bit** for a 64-bit one.
@@ -39,7 +41,8 @@ with anti-cheat. Both are covered in
 
 ```
 dist\
-  virtual-xinput-config.exe    run from anywhere
+  virtual-xinput-gui.exe       the windowed configurator
+  virtual-xinput-config.exe    the same thing at a command line
   virtual-xinput.yml           reference config, fully commented
   README.md
   games.yml                    your game list (created on first use)
@@ -116,7 +119,40 @@ pads and wrong for others. A DualShock 4 reports Square as button 0, so A/B/X/Y
 come out rotated — that is what the wizard fixes, and usually the only thing
 that needs changing.
 
-## The configurator's interactive menu
+## The windowed configurator
+
+`virtual-xinput-gui.exe` is the one to reach for when a mapping is wrong and
+you are not sure why. It needs nothing installed: one static executable, no
+runtime, no redistributable.
+
+- **Pad** — a virtual Xbox controller that moves as you move the real one, next
+  to the mapping it came from. Click any control on the drawn pad to bind it
+  ("Press A", "Push the LEFT stick RIGHT"); right-click one to clear it.
+  Clicking a stick asks for both of its axes in turn. Clicking the ring around
+  a stick binds the stick *click* instead.
+
+  The deadzone sliders are live and drawn on the sticks themselves: the shaded
+  disc is the deadzone, the outer ring is the saturation point, the dim dot is
+  what the hardware reports and the bright one is what the game receives. When
+  the two dots differ, the ring between them is why.
+
+- **Raw input** — every axis, hat and button exactly as the device reports it,
+  before any mapping. When something is wrong, this is the view that tells the
+  truth about the hardware.
+
+- **Device** — identity, what the device reports, and whether it has real
+  DirectInput force feedback.
+
+Before each prompt the controller's resting position is sampled, which is the
+step that tells a trigger resting at its minimum apart from one sharing an axis
+with the other trigger. Leave the pad alone while the bar fills.
+
+Binding is not yet saved from this window — use **Save** in the console
+configurator, or the Games menu there, to write `virtual-xinput.yml`. Profiles
+and game management are the next piece of work; see
+[docs/gui-configurator-spec.md](docs/gui-configurator-spec.md).
+
+## The console configurator's interactive menu
 
 - **Monitor** — every DirectInput axis, hat and button live, next to the XInput
   values they currently produce. The fastest way to see which physical control
@@ -437,3 +473,7 @@ re-checks it against the copy in `System32` on every build. Two residual gaps:
 - No per-game hotkeys, profiles switching at runtime, or on-screen display.
 - MSVC only. The `.def`-based exports and the DirectInput libraries assume the
   Microsoft toolchain.
+- The windowed configurator needs a working Direct3D 11 driver. It falls back
+  to the software rasteriser where there is no usable GPU, but if even that
+  fails it says so and exits; `virtual-xinput-config.exe` has no such
+  requirement.

@@ -129,6 +129,15 @@ const char* HalfSuffix(AxisHalf h) {
 
 } // namespace
 
+void ReadAxesRaw(const DeviceProfile& profile, const RawState& raw, float out[XA_Count]) {
+    out[XA_LeftX]        = ReadStick(profile.axes[XA_LeftX], raw);
+    out[XA_LeftY]        = ReadStick(profile.axes[XA_LeftY], raw);
+    out[XA_RightX]       = ReadStick(profile.axes[XA_RightX], raw);
+    out[XA_RightY]       = ReadStick(profile.axes[XA_RightY], raw);
+    out[XA_LeftTrigger]  = ReadTrigger(profile.axes[XA_LeftTrigger], raw);
+    out[XA_RightTrigger] = ReadTrigger(profile.axes[XA_RightTrigger], raw);
+}
+
 WORD PovToMask(int pov) {
     if (pov < 0) return 0;
 
