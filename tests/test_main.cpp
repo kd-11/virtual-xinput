@@ -928,6 +928,190 @@ void TestGameProfileField() {
     _wremove(path.c_str());
 }
 
+// ---------------------------------------------------------------------------
+// Divergence detection
+// ---------------------------------------------------------------------------
+
+void TestConfigFingerprint() {
+    Section("Games: config fingerprint");
+
+    const std::string a = "poll_hz: 250\ndeadzone:\n  left_stick: 0.15\n";
+
+    Check(ConfigFingerprint(a) == ConfigFingerprint(a), "stable across calls");
+    Check(ConfigFingerprint(a).size() == 16, "16 hex digits");
+
+    // The two things a text editor does without being asked must not read as
+    // somebody's deliberate edit, or every config opened in Notepad would be
+    // reported as modified.
+    std::string crlf;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i] == '\n') crlf += '\r';
+        crlf += a[i];
+    }
+    Check(ConfigFingerprint(crlf) == ConfigFingerprint(a), "CRLF is not a change");
+    Check(ConfigFingerprint(a + "\n\n") == ConfigFingerprint(a), "trailing blank lines are not");
+
+    // Anything else in the file is.
+    Check(ConfigFingerprint("poll_hz: 125\n") != ConfigFingerprint("poll_hz: 250\n"),
+          "a changed value is a change");
+    Check(ConfigFingerprint("# a comment\n" + a) != ConfigFingerprint(a),
+          "an added comment is a change");
+}
+
+void TestGameConfigStates() {
+    Section("Games: what is in the folder");
+
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    const std::wstring toolDir = JoinPath(tmp, L"vx_gamestate_test");
+    const std::wstring gameDir = JoinPath(toolDir, L"TheGame");
+    RemoveTree(toolDir);
+    CreateDirectoryW(toolDir.c_str(), nullptr);
+    CreateDirectoryW(gameDir.c_str(), nullptr);
+
+    std::string  err;
+    ProfileStore store;
+    Check(LoadProfiles(toolDir, store, err), "store loads", err.c_str());
+
+    GameEntry g;
+    g.name   = "The Game";
+    g.folder = gameDir;
+    g.arch   = PeArch::X86;
+
+    // Nothing deployed yet.
+    GameStatus st = CheckGame(toolDir, store, g);
+    Check(st.folderExists, "folder is seen");
+    Check(st.config == ConfigState::Missing, "no config yet");
+    Check(st.profileName == kDefaultProfileName, "an unassigned game falls back to the default");
+    Check(!st.installed, "not installed");
+
+    // Deploy it. There is no payload folder here, so only the config lands -
+    // which is exactly the part under test.
+    Check(DeployConfig(toolDir, g, false, err), "deploys", err.c_str());
+    Check(!g.configHash.empty(), "records what it wrote");
+
+    st = CheckGame(toolDir, store, g);
+    Check(st.config == ConfigState::InSync, "deployed config is in sync");
+
+    // Edited in the game folder.
+    const std::wstring cfgPath = GameConfigPath(g);
+    std::string        text;
+    Check(ReadTextFile(cfgPath, text), "config is readable");
+    Check(WriteTextFile(cfgPath, text + "\npoll_hz: 60\n"), "hand-edit the deployed file");
+
+    st = CheckGame(toolDir, store, g);
+    Check(st.config == ConfigState::Modified, "an edit in the game folder is noticed");
+
+    // Adopting it keeps the edit and re-syncs.
+    Check(AdoptConfig(toolDir, g, "Adopted", err), "adopts", err.c_str());
+    Check(g.profile == "Adopted", "and assigns the game to the new profile");
+    Check(LoadProfiles(toolDir, store, err), "store reloads", err.c_str());
+
+    st = CheckGame(toolDir, store, g);
+    Check(st.config == ConfigState::InSync, "adopted config is in sync");
+
+    std::string adopted;
+    const int   ai = store.FindByName("Adopted");
+    Check(ai >= 0, "the adopted profile exists");
+    if (ai >= 0 && ReadTextFile(store.profiles[ai].path, adopted)) {
+        Check(adopted.find("poll_hz: 60") != std::string::npos,
+              "and it kept the hand-edited line verbatim");
+    }
+
+    // Now move the profile on underneath it.
+    Check(WriteTextFile(store.profiles[ai].path,
+                        "# profile: Adopted\npoll_hz: 90\n"), "edit the profile");
+    st = CheckGame(toolDir, store, g);
+    Check(st.config == ConfigState::OutOfDate,
+          "a profile that moved on leaves the game out of date");
+
+    // Redeploying over it brings both back into line.
+    Check(DeployConfig(toolDir, g, true, err), "redeploys", err.c_str());
+    st = CheckGame(toolDir, store, g);
+    Check(st.config == ConfigState::InSync, "redeploy re-syncs");
+
+    // A file nobody recorded writing.
+    g.configHash.clear();
+    Check(WriteTextFile(cfgPath, "poll_hz: 111\n"), "drop in an unrecorded config");
+    st = CheckGame(toolDir, store, g);
+    Check(st.config == ConfigState::Unknown, "an unrecorded config is not claimed as ours");
+
+    // ...unless it is identical to the profile anyway, which is what a config
+    // deployed before fingerprints existed looks like.
+    std::string profText;
+    Check(ReadTextFile(store.profiles[ai].path, profText), "profile is readable");
+    Check(WriteTextFile(cfgPath, profText), "restore it from the profile by hand");
+    st = CheckGame(toolDir, store, g);
+    Check(st.config == ConfigState::InSync,
+          "a config identical to its profile is in sync even with no record");
+
+    // The default is the one profile adoption must not touch.
+    Check(!AdoptConfig(toolDir, g, kDefaultProfileName, err),
+          "adopting over the default is refused");
+
+    RemoveTree(toolDir);
+}
+
+void TestGameHashPersists() {
+    Section("Games: the fingerprint survives a save");
+
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    const std::wstring path = JoinPath(tmp, L"vx_games_hash_test.yml");
+
+    GameLibrary out;
+    GameEntry   g;
+    g.name       = "Hashed";
+    g.folder     = L"C:\\Games\\Hashed";
+    g.arch       = PeArch::X64;
+    g.configHash = ConfigFingerprint("poll_hz: 250\n");
+    out.games.push_back(g);
+
+    std::string err;
+    Check(SaveGames(path, out, err), "saves", err.c_str());
+
+    GameLibrary in;
+    Check(LoadGames(path, in, err), "loads", err.c_str());
+    if (!in.games.empty()) {
+        Check(in.games[0].configHash == g.configHash, "the fingerprint round-trips");
+    }
+
+    // Without it, every game written before divergence detection would come
+    // back reporting its config as unrecognised.
+    GameEntry plain;
+    plain.name   = "Plain";
+    plain.folder = L"C:\\Games\\Plain";
+    GameLibrary out2;
+    out2.games.push_back(plain);
+    Check(SaveGames(path, out2, err), "saves an entry with no hash", err.c_str());
+    GameLibrary in2;
+    Check(LoadGames(path, in2, err), "loads it back", err.c_str());
+    Check(!in2.games.empty() && in2.games[0].configHash.empty(),
+          "an absent hash stays absent rather than becoming garbage");
+
+    _wremove(path.c_str());
+}
+
+void TestExeSelection() {
+    Section("Games: picking the executable");
+
+    std::vector<ExeCandidate> exes;
+    Check(PreferredExe(exes) == -1, "nothing to pick from");
+
+    ExeCandidate a; a.name = L"launcher.exe"; a.arch = PeArch::X64;
+    ExeCandidate b; b.name = L"game.exe";     b.arch = PeArch::X86;
+    exes.push_back(a);
+    exes.push_back(b);
+
+    // 32-bit wins: a game old enough to need this wrapper is overwhelmingly
+    // likely to be the 32-bit one, and the 64-bit sibling is the launcher.
+    CheckEqInt(PreferredExe(exes), 1, "the 32-bit executable is preferred");
+
+    std::vector<ExeCandidate> allX64;
+    allX64.push_back(a);
+    CheckEqInt(PreferredExe(allX64), 0, "with no 32-bit one, the first will do");
+}
+
 } // namespace
 
 int main() {
@@ -952,6 +1136,10 @@ int main() {
     TestProfileSlugs();
     TestProfileStore();
     TestGameProfileField();
+    TestConfigFingerprint();
+    TestGameConfigStates();
+    TestGameHashPersists();
+    TestExeSelection();
 
     printf("\n----------------------------------------\n");
     if (g_failures == 0) {

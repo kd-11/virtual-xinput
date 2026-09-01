@@ -238,6 +238,47 @@ bool SaveProfile(ProfileStore& store, const std::string& name, const Config& cfg
     return LoadProfiles(store.toolDir, store, err);
 }
 
+bool SaveProfileText(ProfileStore& store, const std::string& name,
+                     const std::string& text, std::string& err) {
+    const std::string trimmed = Trim(name);
+    if (trimmed.empty()) {
+        err = "a profile needs a name";
+        return false;
+    }
+    if (_stricmp(trimmed.c_str(), kDefaultProfileName) == 0) {
+        err = "the default profile cannot be overwritten - save under another name";
+        return false;
+    }
+    // Checked but not rewritten. A profile that does not parse would install
+    // into a game folder and leave the DLL quietly falling back to its own
+    // defaults, with nothing anywhere saying why.
+    Config check;
+    if (!ConfigParse(text, check)) {
+        err = "that config does not parse: " +
+              (check.error.empty() ? std::string("unknown error") : check.error);
+        return false;
+    }
+
+    // The incoming text may already carry a header naming some other profile -
+    // a deployed config does. Strip it so the stored file names itself.
+    std::string body = text;
+    if (body.compare(0, strlen(kNameMarker), kNameMarker) == 0) {
+        const size_t nl = body.find('\n');
+        body = (nl == std::string::npos) ? std::string() : body.substr(nl + 1);
+    }
+
+    const int         existing = store.FindByName(trimmed);
+    const std::string slug     = (existing >= 0)
+                                   ? store.profiles[existing].slug
+                                   : UniqueSlug(store, ProfileSlug(trimmed), std::string());
+
+    if (!WriteTextFile(ProfilePath(store.dir, slug), WithNameHeader(trimmed, body))) {
+        err = "could not write " + slug + ".yml";
+        return false;
+    }
+    return LoadProfiles(store.toolDir, store, err);
+}
+
 bool DeleteProfile(ProfileStore& store, const std::string& name, std::string& err) {
     const int i = store.FindByName(name);
     if (i < 0) {

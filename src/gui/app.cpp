@@ -68,8 +68,14 @@ void BipolarBar(float v, float width) {
 
 App::App()
     : selected_(-1), dev_(nullptr), polled_(false),
-      lastEnumTick_(0), activeProfile_(-1), statusTick_(0) {
-    nameBuf_[0] = '\0';
+      lastEnumTick_(0), activeProfile_(-1),
+      gameCheckTick_(0), gameSel_(-1),
+      addOpen_(false), addExe_(-1),
+      confirm_(Confirm::None), confirmGame_(-1),
+      statusTick_(0) {
+    nameBuf_[0]   = '\0';
+    addName_[0]   = '\0';
+    adoptName_[0] = '\0';
 }
 
 App::~App() { Shutdown(); }
@@ -96,6 +102,9 @@ bool App::Init(std::string& err) {
             profileError_ = "profiles unavailable - " + profileError_;
         }
     }
+
+    // The game list lives beside them, for the same reason.
+    ReloadGames();
     return true;
 }
 
@@ -351,6 +360,10 @@ void App::Frame() {
         }
         if (ImGui::BeginTabItem("Profiles")) {
             DrawProfilesTab();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Games")) {
+            DrawGamesTab();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

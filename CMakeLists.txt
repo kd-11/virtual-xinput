@@ -130,9 +130,12 @@ if(VX_BUILD_GUI)
         src/gui/main.cpp
         src/gui/platform.cpp
         src/gui/app.cpp
+        src/gui/games_tab.cpp
         src/gui/draw_pad.cpp
     )
-    target_link_libraries(virtual-xinput-gui PRIVATE vx_common vx_imgui)
+    # shell32 for the folder picker and Explorer hand-off; ole32 arrives through
+    # vx_common.
+    target_link_libraries(virtual-xinput-gui PRIVATE vx_common vx_imgui shell32)
     install(PROGRAMS $<TARGET_FILE:virtual-xinput-gui> DESTINATION .)
 endif()
 

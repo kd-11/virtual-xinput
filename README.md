@@ -84,7 +84,9 @@ and no other copy of it exists.
 ## Managing games
 
 The configurator keeps a list of game folders and installs or removes the tool
-from them.
+from them. Both front-ends share one library file and one installer, so it does
+not matter which you use — the **Games** tab in `virtual-xinput-gui.exe` is the
+easier route, and the commands below are the same thing for scripting.
 
 ```
 virtual-xinput-config                    interactive menu
@@ -106,6 +108,38 @@ is the game.
 The `games` menu also offers **show a game's config** and **write the current
 mapping into a game's folder**, so you can run the wizard once and push the
 result straight into whichever game needs it.
+
+### Verifying a game's configuration
+
+A config in a game folder can be edited by hand after it is deployed, and a
+profile can change after a game was installed from it. Neither is a mistake, so
+the tool tracks both rather than pretending files stay as it left them.
+
+Deployment records a fingerprint of what it wrote. Comparing that against the
+file on disk and against the assigned profile gives the state shown in the
+Games tab:
+
+| State | What it means |
+|---|---|
+| **in sync** | The folder matches the profile. Nothing to do. |
+| **modified** | Edited in the game folder after deployment. |
+| **out of date** | Untouched, but the profile has changed since. |
+| **unrecognised** | A config is there that this tool has no record of writing. |
+| **missing** | No config at all; the DLL falls back to its own defaults. |
+
+Two actions resolve the first four, and the tool never picks between them for
+you:
+
+- **Redeploy config** writes the assigned profile into the folder. It asks
+  first when the file is *modified* or *unrecognised*, because there is
+  something to lose; it does not ask when the file is merely *out of date*.
+- **Adopt as profile** does the reverse: it saves the config from the game
+  folder as a named profile — **verbatim**, comments and formatting intact —
+  and assigns the game to it. This is how a mapping tuned by hand in one game
+  becomes reusable in the next.
+
+Opening a config in a text editor and saving it unchanged does not count as a
+modification: line endings and trailing blank lines are ignored.
 
 ### Uninstalling is careful
 
@@ -172,8 +206,18 @@ with the other trigger. Leave the pad alone while the bar fills.
   folder. Save the current mapping from the Pad tab; load, duplicate or delete
   from here.
 
-Adding and installing games is still console-only; see
-[docs/gui-configurator-spec.md](docs/gui-configurator-spec.md).
+- **Games** — the game library. Add a folder, pick which executable is the game
+  (the architecture is read from it), assign a profile, install and uninstall.
+
+  Each row says what is actually in the folder rather than what should be:
+  whether the DLLs are there, and whether the config matches the profile it came
+  from. See [Verifying a game's configuration](#verifying-a-games-configuration).
+
+  It also warns about the two things that make an install look successful and
+  change nothing — a Store/UWP folder, and a folder that isn't writable.
+
+The window can do everything the console app can. The console app remains for
+scripting and for machines where Direct3D 11 is unavailable.
 
 ## The console configurator's interactive menu
 
@@ -296,7 +340,8 @@ Requires MSVC and CMake.
 .\build.ps1 -NoTests     # skip the test run
 ```
 
-`build.ps1` preserves `dist\games.yml` across rebuilds.
+`build.ps1` preserves `dist\games.yml` and `dist\profiles\` across rebuilds,
+including when the build itself fails partway.
 
 By hand, per architecture:
 

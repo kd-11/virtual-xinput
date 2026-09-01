@@ -62,6 +62,16 @@ bool ReadProfile(const ProfileEntry& entry, Config& out, std::string& err);
 bool SaveProfile(ProfileStore& store, const std::string& name, const Config& cfg,
                  std::string& err);
 
+// Stores config text exactly as given, rather than round-tripping it through
+// the parser and emitter. That preserves comments, ordering and hand formatting
+// - which is the entire point when the text came from a file somebody edited
+// themselves, such as a config adopted back out of a game folder.
+//
+// Refuses to write the default profile: it has to stay the auto-detecting one
+// so that installing always has something safe to fall back on.
+bool SaveProfileText(ProfileStore& store, const std::string& name,
+                     const std::string& text, std::string& err);
+
 // Removes a profile. Refuses to remove the default.
 bool DeleteProfile(ProfileStore& store, const std::string& name, std::string& err);
 

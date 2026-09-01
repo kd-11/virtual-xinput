@@ -1,8 +1,9 @@
 # Spec: GUI configurator
 
-Status: **phases 1–4 built, 5–6 outstanding.** The window, the live pad
-preview, click-to-bind and the profile store are in. The Games tab and
-divergence detection are not. See *Phases* at the end for what is left.
+Status: **phases 1–5 built, 6 outstanding.** The window, the live pad preview,
+click-to-bind, the profile store and the Games tab are in; the GUI is now a
+complete replacement for the console app rather than a companion to it. What is
+left is polish — see *Phases* at the end.
 
 The console configurator works and will stay. What it cannot do well is show
 you a control moving while you decide what to bind it to — and that is most of
@@ -227,14 +228,38 @@ which of the two happened.
 A config in a game folder can be edited by hand after deployment. The tool must
 not pretend that cannot happen.
 
-Install records a hash of what it wrote. When the file on disk no longer matches
-it, the Games tab marks the game **modified**, and offers two explicit choices:
-adopt the game's file back into the profile, or overwrite it from the profile.
-It never silently picks one.
+Deployment records a fingerprint of what it wrote, in `games.yml` as
+`config_hash`. Comparing that against both the file on disk and the assigned
+profile gives five states, which is one more than the plan called for:
 
-Editing a profile does not reach into game folders on its own. Games using it
-are marked **out of date**, with a "redeploy" action listing exactly which
-folders will be written.
+| State | Meaning |
+|---|---|
+| `missing` | No config in the folder. The DLL falls back to its own defaults. |
+| `in sync` | Matches what we wrote, and the profile still says the same thing. |
+| `modified` | Edited in the game folder after deployment. |
+| `out of date` | Untouched there, but the profile has moved on since. |
+| `unrecognised` | A config we have no record of writing. |
+
+`unrecognised` is the state the original plan did not account for: every config
+deployed before fingerprinting existed is in it, as is any file dropped in by
+hand. Reporting those as *modified* would be a lie — there is nothing to compare
+against — and treating them as *in sync* would let redeploy silently destroy
+them. So it is its own state, and it offers the same two choices as `modified`.
+The one shortcut: a config byte-identical to the profile it would be deployed
+from is reported `in sync` regardless, since there is nothing to lose.
+
+The fingerprint is FNV-1a over content-normalised text — CRLF folded, trailing
+blank space ignored — so opening a config in Notepad and saving it does not read
+as a deliberate edit. It is not a cryptographic hash and does not need to be:
+it distinguishes two files we wrote, and there is nobody to defend against.
+
+**Modified and out-of-date never resolve themselves.** The tab offers *Adopt as
+profile*, which stores the game's file verbatim — comments, ordering and hand
+formatting intact, since the reason to adopt rather than re-derive is that
+somebody's hand is in it — and *Redeploy*, which overwrites from the profile.
+Redeploy asks first whenever the file is `modified` or `unrecognised`, and
+never asks when it is merely `out of date`: there is nothing to lose in that
+case, and a prompt with no stakes teaches people to click through prompts.
 
 ### Uninstall
 
@@ -296,13 +321,16 @@ passing.
 4. ~~**Profiles.**~~ **Done.** The store, the always-present default, the
    Profiles tab, and saving from the Pad tab. `install-writes-config` was
    pulled forward from phase 5 because without it profiles were inert.
-5. **Games.** The Games tab, profile assignment from the GUI, divergence
-   detection.
-6. **Polish.** Store/UWP and permission warnings, FF test, README.
+5. ~~**Games.**~~ **Done.** The Games tab, profile assignment, install and
+   uninstall, divergence detection, adopt and redeploy. The Store/UWP and
+   permission warnings were pulled forward from phase 6: both fail by making an
+   install look like it worked and change nothing, which is precisely the class
+   of thing this tab exists to make visible.
+6. **Polish.** A force-feedback test button, the raw-YAML profile editor, and
+   a pass over the README now that the GUI is the primary front-end.
 
-Phase 5 is next. Adding a game, assigning it a profile and installing are all
-still console-only; the GUI can now produce and store a mapping but cannot put
-one into a game folder.
+Phase 6 is next, and nothing in it is load-bearing. Everything the console app
+can do, the window can now do.
 
 ## Decisions needing sign-off
 

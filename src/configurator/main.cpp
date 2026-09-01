@@ -490,44 +490,30 @@ bool BuildGameEntry(const std::wstring& folder, GameEntry& g, bool interactive,
         return false;
     }
 
-    g.folder = folder;
-    g.name   = Narrow(LeafName(folder));
-
-    std::vector<std::wstring> exes = FindExecutables(folder);
-    if (exes.empty()) {
-        err = "no .exe found in that folder - is it the folder the game runs from?";
-        return false;
-    }
-
-    size_t pick = 0;
-    if (exes.size() > 1) {
-        if (interactive) {
+    // Which executable to use is the only decision here worth a prompt; the
+    // rest lives in vx::MakeGameEntry so the windowed configurator makes the
+    // same entry from the same folder rather than reimplementing it.
+    std::wstring chosen;
+    if (interactive) {
+        std::vector<ExeCandidate> exes = ScanExecutables(folder);
+        if (exes.size() > 1) {
+            const int def = PreferredExe(exes);
             printf("\nSeveral executables here. Which one is the game?\n");
             for (size_t i = 0; i < exes.size(); ++i) {
-                PeArch a = DetectExeArch(JoinPath(folder, exes[i]));
-                printf("  [%d] %-40S %s\n", (int)i, exes[i].c_str(), PeArchName(a));
+                printf("  [%d] %-40S %s\n", (int)i, exes[i].name.c_str(),
+                       PeArchName(exes[i].arch));
             }
-            std::string sel = ReadLine("Number (Enter for 0): ");
+            char prompt[64];
+            snprintf(prompt, sizeof(prompt), "Number (Enter for %d): ", def < 0 ? 0 : def);
+            std::string sel = ReadLine(prompt);
             if (!sel.empty()) {
                 int v = atoi(sel.c_str());
-                if (v >= 0 && v < (int)exes.size()) pick = (size_t)v;
-            }
-        } else {
-            // Non-interactive: prefer the first 32-bit executable, since that is
-            // overwhelmingly what old games are, and report the assumption.
-            for (size_t i = 0; i < exes.size(); ++i) {
-                if (DetectExeArch(JoinPath(folder, exes[i])) == PeArch::X86) { pick = i; break; }
+                if (v >= 0 && v < (int)exes.size()) chosen = exes[v].name;
             }
         }
     }
 
-    g.exe  = exes[pick];
-    g.arch = DetectExeArch(JoinPath(folder, g.exe));
-    if (g.arch == PeArch::Unknown) {
-        err = "could not read the PE header of " + Narrow(g.exe);
-        return false;
-    }
-    return true;
+    return MakeGameEntry(folder, chosen, g, err);
 }
 
 // Prints what a game folder's config currently says, if it has one.

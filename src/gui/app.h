@@ -2,6 +2,7 @@
 
 #include "../common/detect.h"
 #include "../common/di_device.h"
+#include "../common/games.h"
 #include "../common/profiles.h"
 
 #include "draw_pad.h"
@@ -47,6 +48,7 @@ private:
     void DrawRawTab();
     void DrawDeviceTab();
     void DrawProfilesTab();
+    void DrawGamesTab();
     void DrawCaptureBanner();
     void DrawMappingTable();
     void DrawDeadzones();
@@ -84,6 +86,45 @@ private:
     int          activeProfile_;     // index in profiles_, or -1 for unsaved
     char         nameBuf_[64];       // the name field on the Pad tab's save bar
     std::string  profileError_;      // sticky: a broken store needs to stay visible
+
+    // --- games ------------------------------------------------------------
+    void ReloadGames();
+    void SaveGameLibrary();
+
+    // Re-reads what is actually in each game folder. Only called while the
+    // Games tab is on screen, and rate-limited, because it touches the disk -
+    // including a write probe, which is not something to do sixty times a
+    // second to somebody's game directory.
+    void RefreshGameStatus(bool force);
+
+    void DrawGameList();
+    void DrawGameDetails(int index);
+    void DrawAddGameSection();
+    void BeginAddGame(const std::wstring& folder);
+
+    GameLibrary             games_;
+    std::wstring            gamesPath_;
+    std::vector<GameStatus> gameStatus_;   // parallel to games_.games
+    DWORD                   gameCheckTick_;
+    int                     gameSel_;
+    std::string             gamesError_;
+
+    // The add-a-game flow: pick a folder, confirm which executable is the game,
+    // name it. Held here rather than in a modal so the folder can be re-picked
+    // without starting over.
+    bool                      addOpen_;
+    std::wstring              addFolder_;
+    std::vector<ExeCandidate> addExes_;
+    int                       addExe_;
+    char                      addName_[96];
+    std::string               addError_;
+
+    // Deferred confirmations, so nothing destructive happens on the same frame
+    // as the click that asked for it.
+    enum class Confirm { None, Redeploy, Forget, Adopt };
+    Confirm confirm_;
+    int     confirmGame_;
+    char    adoptName_[64];
 
     std::string status_;
     DWORD       statusTick_;

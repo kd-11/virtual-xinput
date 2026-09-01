@@ -39,6 +39,13 @@ if (Test-Path $profilesDir) {
     $savedProfiles = $true
 }
 
+# Everything from the first deletion to the restore runs inside try/finally.
+# Without it a failing compile or a failing test takes the user's game library
+# and profiles with it: dist is already deleted by then, and the restore at the
+# bottom is never reached. Losing somebody's work because a build broke is not
+# an acceptable way for a build script to fail.
+try {
+
 if ($Clean) {
     foreach ($d in @((Join-Path $root "build"), $dist)) {
         if (Test-Path $d) { Remove-Item -Recurse -Force $d }
@@ -82,12 +89,19 @@ foreach ($t in $targets) {
     if ($LASTEXITCODE -ne 0) { throw "install failed for $($t.Name)" }
 }
 
-if ($savedGames) { Set-Content -Path $gamesFile -Value $savedGames -NoNewline }
+} finally {
+    # The dist folder may not exist at all if the build died early, so recreate
+    # it rather than assuming cmake --install got that far.
+    if ($savedGames -or $savedProfiles) {
+        New-Item -ItemType Directory -Force $dist | Out-Null
+    }
+    if ($savedGames) { Set-Content -Path $gamesFile -Value $savedGames -NoNewline }
 
-if ($savedProfiles) {
-    New-Item -ItemType Directory -Force $profilesDir | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $stash "*") $profilesDir -ErrorAction SilentlyContinue
-    Remove-Item -Recurse -Force $stash -ErrorAction SilentlyContinue
+    if ($savedProfiles) {
+        New-Item -ItemType Directory -Force $profilesDir | Out-Null
+        Copy-Item -Recurse -Force (Join-Path $stash "*") $profilesDir -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $stash -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host ""

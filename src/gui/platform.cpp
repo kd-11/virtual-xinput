@@ -1,6 +1,8 @@
 #include "platform.h"
 
 #include <d3d11.h>
+#include <shlobj.h>
+#include <shellapi.h>
 #include <tchar.h>
 
 #include "imgui.h"
@@ -273,6 +275,62 @@ void PlatformEndFrame() {
 }
 
 HWND PlatformWindow() { return g_hwnd; }
+
+// ---------------------------------------------------------------------------
+// Shell integration
+// ---------------------------------------------------------------------------
+
+bool PickFolder(const wchar_t* title, const std::wstring& start, std::wstring& out) {
+    // COM is initialised here rather than at startup because this is the only
+    // thing in the app that wants it. RPC_E_CHANGED_MODE means somebody else
+    // got there first with a different apartment, which is fine - we just must
+    // not uninitialise on the way out in that case.
+    const HRESULT init   = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool    ownCom = SUCCEEDED(init);
+
+    bool          picked = false;
+    IFileDialog*  dlg    = nullptr;
+
+    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(&dlg)))) {
+        DWORD flags = 0;
+        if (SUCCEEDED(dlg->GetOptions(&flags))) {
+            dlg->SetOptions(flags | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM |
+                            FOS_PATHMUSTEXIST);
+        }
+        if (title) dlg->SetTitle(title);
+
+        if (!start.empty()) {
+            IShellItem* item = nullptr;
+            if (SUCCEEDED(SHCreateItemFromParsingName(start.c_str(), nullptr,
+                                                      IID_PPV_ARGS(&item)))) {
+                dlg->SetFolder(item);
+                item->Release();
+            }
+        }
+
+        if (SUCCEEDED(dlg->Show(g_hwnd))) {
+            IShellItem* item = nullptr;
+            if (SUCCEEDED(dlg->GetResult(&item))) {
+                PWSTR path = nullptr;
+                if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                    out    = path;
+                    picked = true;
+                    CoTaskMemFree(path);
+                }
+                item->Release();
+            }
+        }
+        dlg->Release();
+    }
+
+    if (ownCom) CoUninitialize();
+    return picked;
+}
+
+void RevealFolder(const std::wstring& path) {
+    ShellExecuteW(g_hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
 
 } // namespace gui
 } // namespace vx

@@ -28,5 +28,13 @@ void PlatformEndFrame();
 
 HWND PlatformWindow();
 
+// Modal "choose a folder" dialog. Returns false when the user cancels, which
+// is not an error. `start` may name a folder to open at, or be empty.
+bool PickFolder(const wchar_t* title, const std::wstring& start, std::wstring& out);
+
+// Opens a folder in Explorer. Best-effort: there is nothing useful to do when
+// the shell declines.
+void RevealFolder(const std::wstring& path);
+
 } // namespace gui
 } // namespace vx

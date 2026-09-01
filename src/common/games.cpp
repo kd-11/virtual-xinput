@@ -6,6 +6,7 @@
 #include "yaml.h"
 
 #include <cstdio>
+#include <cwctype>
 
 namespace vx {
 namespace {
@@ -163,6 +164,65 @@ std::vector<std::wstring> FindExecutables(const std::wstring& folder) {
     return out;
 }
 
+std::vector<ExeCandidate> ScanExecutables(const std::wstring& folder) {
+    std::vector<std::wstring> names = FindExecutables(folder);
+    std::vector<ExeCandidate> out;
+    out.reserve(names.size());
+    for (size_t i = 0; i < names.size(); ++i) {
+        ExeCandidate c;
+        c.name = names[i];
+        c.arch = DetectExeArch(JoinPath(folder, names[i]));
+        out.push_back(c);
+    }
+    return out;
+}
+
+int PreferredExe(const std::vector<ExeCandidate>& exes) {
+    if (exes.empty()) return -1;
+    for (size_t i = 0; i < exes.size(); ++i) {
+        if (exes[i].arch == PeArch::X86) return (int)i;
+    }
+    return 0;
+}
+
+bool MakeGameEntry(const std::wstring& folder, const std::wstring& exe,
+                   GameEntry& game, std::string& err) {
+    if (!DirectoryExists(folder)) {
+        err = "no such folder: " + Narrow(folder);
+        return false;
+    }
+
+    game.folder = folder;
+    if (game.name.empty()) game.name = Narrow(LeafName(folder));
+
+    std::vector<ExeCandidate> exes = ScanExecutables(folder);
+    if (exes.empty()) {
+        err = "no .exe found in that folder - is it the folder the game runs from?";
+        return false;
+    }
+
+    int pick = -1;
+    if (!exe.empty()) {
+        for (size_t i = 0; i < exes.size(); ++i) {
+            if (_wcsicmp(exes[i].name.c_str(), exe.c_str()) == 0) { pick = (int)i; break; }
+        }
+        if (pick < 0) {
+            err = Narrow(exe) + " is not in that folder";
+            return false;
+        }
+    } else {
+        pick = PreferredExe(exes);
+    }
+
+    game.exe  = exes[pick].name;
+    game.arch = exes[pick].arch;
+    if (game.arch == PeArch::Unknown) {
+        err = "could not read the PE header of " + Narrow(game.exe);
+        return false;
+    }
+    return true;
+}
+
 std::wstring PayloadDir(const std::wstring& toolDir, PeArch arch) {
     return JoinPath(toolDir, arch == PeArch::X64 ? L"x64" : L"x86");
 }
@@ -197,21 +257,190 @@ bool FilesIdentical(const std::wstring& a, const std::wstring& b) {
     return memcmp(&da[0], &db[0], da.size()) == 0;
 }
 
-// Resolves the game's profile to config text, falling back to the default.
-// LoadProfiles regenerates the default when it is missing, so this cannot come
-// back empty-handed.
+// ---------------------------------------------------------------------------
+// Configuration: what is in the folder, and how it got there
+// ---------------------------------------------------------------------------
+
+std::wstring GameConfigPath(const GameEntry& game) {
+    return JoinPath(game.folder, L"virtual-xinput.yml");
+}
+
+std::string ConfigFingerprint(const std::string& text) {
+    // Normalise before hashing so that a round trip through an editor that
+    // rewrites line endings, or adds a trailing newline, is not reported as
+    // somebody's deliberate edit. Those are the two changes a text editor makes
+    // without being asked; anything else in the file is a real change.
+    std::string norm;
+    norm.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\r') continue;
+        norm += text[i];
+    }
+    while (!norm.empty() && (norm[norm.size() - 1] == '\n' || norm[norm.size() - 1] == ' ' ||
+                             norm[norm.size() - 1] == '\t')) {
+        norm.erase(norm.size() - 1);
+    }
+
+    unsigned long long h = 1469598103934665603ULL;   // FNV-1a 64-bit
+    for (size_t i = 0; i < norm.size(); ++i) {
+        h ^= (unsigned char)norm[i];
+        h *= 1099511628211ULL;
+    }
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%016llx", h);
+    return buf;
+}
+
+const char* ConfigStateName(ConfigState s) {
+    switch (s) {
+        case ConfigState::Missing:   return "missing";
+        case ConfigState::Unknown:   return "unrecognised";
+        case ConfigState::InSync:    return "in sync";
+        case ConfigState::Modified:  return "modified";
+        case ConfigState::OutOfDate: return "out of date";
+    }
+    return "unknown";
+}
+
+bool LooksPackaged(const std::wstring& folder) {
+    // An AppxManifest beside the executable is conclusive; the WindowsApps path
+    // catches the case where the manifest sits a level up.
+    if (FileExists(JoinPath(folder, L"AppxManifest.xml"))) return true;
+
+    std::wstring lower = folder;
+    for (size_t i = 0; i < lower.size(); ++i) lower[i] = (wchar_t)towlower(lower[i]);
+    return lower.find(L"\\windowsapps\\") != std::wstring::npos;
+}
+
+bool FolderWritable(const std::wstring& folder) {
+    // Asking the filesystem beats reasoning about ACLs, and DELETE_ON_CLOSE
+    // means the probe cleans up after itself even if we are killed here.
+    const std::wstring probe = JoinPath(folder, L".virtual-xinput-write-test");
+    HANDLE h = CreateFileW(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    CloseHandle(h);
+    return true;
+}
+
+// Resolves the game's profile to a store index, falling back to the default.
+// LoadProfiles regenerates the default when it is missing, so on a healthy
+// store this cannot come back empty-handed.
+static int ResolveProfileIndex(const ProfileStore& store, const GameEntry& game,
+                               bool* missing) {
+    const int named = game.profile.empty() ? -1 : store.FindByName(game.profile);
+    if (missing) *missing = (!game.profile.empty() && named < 0);
+    return (named >= 0) ? named : store.DefaultIndex();
+}
+
 static bool ResolveProfileText(const std::wstring& toolDir, const GameEntry& game,
                                std::string& text, std::string& err) {
     ProfileStore store;
     if (!LoadProfiles(toolDir, store, err)) return false;
 
-    int i = game.profile.empty() ? -1 : store.FindByName(game.profile);
-    if (i < 0) i = store.DefaultIndex();
+    const int i = ResolveProfileIndex(store, game, nullptr);
     if (i < 0) {
         err = "no profile to deploy and no default to fall back on";
         return false;
     }
     return ReadTextFile(store.profiles[i].path, text);
+}
+
+GameStatus CheckGame(const std::wstring& toolDir, const ProfileStore& profiles,
+                     const GameEntry& game) {
+    GameStatus st;
+    st.configPath   = GameConfigPath(game);
+    st.folderExists = DirectoryExists(game.folder);
+
+    const int pi = ResolveProfileIndex(profiles, game, &st.profileMissing);
+    if (pi >= 0) st.profileName = profiles.profiles[pi].name;
+
+    if (!st.folderExists) return st;   // everything below would be a lie
+
+    const std::vector<std::wstring> dlls = PayloadDlls(toolDir, game.arch);
+    st.dllsExpected = (int)dlls.size();
+    for (size_t i = 0; i < dlls.size(); ++i) {
+        if (FileExists(JoinPath(game.folder, dlls[i]))) ++st.dllsPresent;
+    }
+    st.installed      = IsInstalled(game);
+    st.looksPackaged  = LooksPackaged(game.folder);
+    st.folderWritable = FolderWritable(game.folder);
+
+    std::string onDisk;
+    if (!ReadTextFile(st.configPath, onDisk)) return st;   // stays Missing
+
+    st.configProfileName = ProfileNameFromText(onDisk);
+    const std::string diskHash = ConfigFingerprint(onDisk);
+
+    std::string profileText;
+    const bool  haveProfile =
+        (pi >= 0) && ReadTextFile(profiles.profiles[pi].path, profileText);
+    const bool matchesProfile =
+        haveProfile && ConfigFingerprint(profileText) == diskHash;
+
+    if (game.configHash.empty()) {
+        // No record of writing it: either it predates fingerprinting or someone
+        // put it there. If it is identical to the profile it would be deployed
+        // from, saying "unrecognised" would be pedantic rather than useful.
+        st.config = matchesProfile ? ConfigState::InSync : ConfigState::Unknown;
+    } else if (diskHash != game.configHash) {
+        // Edited in the game folder. This wins over out-of-date because it is
+        // the one with work in it that nothing else holds a copy of.
+        st.config = ConfigState::Modified;
+    } else {
+        st.config = matchesProfile ? ConfigState::InSync : ConfigState::OutOfDate;
+    }
+    return st;
+}
+
+bool DeployConfig(const std::wstring& toolDir, GameEntry& game, bool overwrite,
+                  std::string& err, bool* wrote) {
+    if (wrote) *wrote = false;
+
+    if (!DirectoryExists(game.folder)) {
+        err = "game folder does not exist: " + Narrow(game.folder);
+        return false;
+    }
+
+    const std::wstring cfgPath = GameConfigPath(game);
+    if (FileExists(cfgPath) && !overwrite) return true;
+
+    std::string text;
+    if (!ResolveProfileText(toolDir, game, text, err)) return false;
+    if (!WriteTextFile(cfgPath, text)) {
+        err = "could not write " + Narrow(cfgPath);
+        return false;
+    }
+
+    game.configHash = ConfigFingerprint(text);
+    if (wrote) *wrote = true;
+    return true;
+}
+
+bool AdoptConfig(const std::wstring& toolDir, GameEntry& game,
+                 const std::string& profileName, std::string& err) {
+    std::string text;
+    if (!ReadTextFile(GameConfigPath(game), text)) {
+        err = "there is no config in " + Narrow(game.folder) + " to adopt";
+        return false;
+    }
+
+    ProfileStore store;
+    if (!LoadProfiles(toolDir, store, err)) return false;
+
+    // Stored verbatim, not round-tripped through the parser: the reason to
+    // adopt a file rather than re-derive it is that somebody's hand is in it,
+    // and re-emitting would throw away their comments and their layout.
+    if (!SaveProfileText(store, profileName, text, err)) return false;
+    game.profile = profileName;
+
+    // Write the stored profile straight back out. The only difference from what
+    // is already there is the header line naming the new profile - but without
+    // this the folder and the profile it now claims to come from would differ
+    // by that line, and the game would report itself out of date the moment it
+    // was adopted.
+    return DeployConfig(toolDir, game, true, err);
 }
 
 bool InstallGame(const std::wstring& toolDir, GameEntry& game, std::string& err,
@@ -250,18 +479,15 @@ bool InstallGame(const std::wstring& toolDir, GameEntry& game, std::string& err,
 
     // The config is deliberately not added to installedFiles: uninstall leaves
     // it behind so a mapping someone worked out survives removing the DLLs.
-    if (configWritten) *configWritten = false;
-
-    const std::wstring cfgPath = JoinPath(game.folder, L"virtual-xinput.yml");
-    if (!FileExists(cfgPath)) {
-        std::string text;
-        if (!ResolveProfileText(toolDir, game, text, err)) return false;
-        if (!WriteTextFile(cfgPath, text)) {
-            err = "installed the DLLs but could not write " + Narrow(cfgPath);
-            return false;
-        }
-        if (configWritten) *configWritten = true;
+    //
+    // overwrite is false, so a config already in the folder is left exactly as
+    // it is. Replacing one is a separate, deliberate act - see DeployConfig.
+    bool wrote = false;
+    if (!DeployConfig(toolDir, game, false, err, &wrote)) {
+        err = "installed the DLLs, but " + err;
+        return false;
     }
+    if (configWritten) *configWritten = wrote;
     return true;
 }
 
@@ -338,7 +564,8 @@ bool LoadGames(const std::wstring& path, GameLibrary& lib, std::string& err) {
         g.folder = Widen(n.Str("folder", ""));
         g.exe    = Widen(n.Str("exe", ""));
         g.arch   = PeArchFromName(n.Str("arch", "unknown"));
-        g.profile = n.Str("profile", "");
+        g.profile    = n.Str("profile", "");
+        g.configHash = n.Str("config_hash", "");
 
         if (g.folder.empty()) continue;
         if (g.name.empty()) g.name = Narrow(LeafName(g.folder));
@@ -381,6 +608,9 @@ bool SaveGames(const std::wstring& path, const GameLibrary& lib, std::string& er
         fprintf(f, "    arch:   %s\n", PeArchName(g.arch));
         if (!g.profile.empty()) {
             fprintf(f, "    profile: %s\n", QuoteYaml(g.profile).c_str());
+        }
+        if (!g.configHash.empty()) {
+            fprintf(f, "    config_hash: %s\n", QuoteYaml(g.configHash).c_str());
         }
 
         if (!g.installedFiles.empty()) {
