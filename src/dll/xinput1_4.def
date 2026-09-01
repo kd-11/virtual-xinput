@@ -1,0 +1,20 @@
+; Ordinals verified against the genuine Microsoft XInput1_4.dll.
+;
+; 1.4 dropped XInputGetDSoundAudioDeviceGuids (ordinal 6 is absent) and added
+; XInputGetAudioDeviceIds at 10. Ordinals 108/109 are undocumented internals
+; that nothing imports, and are deliberately left out: a missing ordinal fails
+; to load, which is diagnosable, whereas a wrong-signature stub crashes.
+EXPORTS
+    DllMain                     @1
+    XInputGetState              @2
+    XInputSetState              @3
+    XInputGetCapabilities       @4
+    XInputEnable                @5
+    XInputGetBatteryInformation @7
+    XInputGetKeystroke          @8
+    XInputGetAudioDeviceIds     @10
+    XInputGetStateEx            @100 NONAME
+    XInputWaitForGuideButton    @101 NONAME
+    XInputCancelGuideButtonWait @102 NONAME
+    XInputPowerOffController    @103 NONAME
+    XInputGetBaseBusInformation @104 NONAME

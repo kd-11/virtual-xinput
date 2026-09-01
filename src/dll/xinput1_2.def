@@ -1,0 +1,13 @@
+; XInput 1.1 / 1.2.
+;
+; UNVERIFIED: no genuine copy was available to check against. These versions
+; export the same five functions as 9.1.0, so the 9.1.0 layout is used. Import
+; by name is unaffected either way; only a game importing these BY ORDINAL could
+; be hurt by a wrong guess. If such a game misbehaves, delete xinput1_1.dll and
+; xinput1_2.dll - almost nothing needs them.
+EXPORTS
+    DllMain                         @1
+    XInputGetCapabilities           @2
+    XInputGetDSoundAudioDeviceGuids @3
+    XInputGetState                  @4
+    XInputSetState                  @5

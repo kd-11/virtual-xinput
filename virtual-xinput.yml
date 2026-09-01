@@ -1,0 +1,176 @@
+# virtual-xinput - reference configuration
+#
+# This file is OPTIONAL. With no config at all, the DLL auto-detects a sensible
+# mapping and most pads just work. Add this file only when you need to change
+# something: deadzones, a button order the auto-mapper got wrong, or which
+# physical pad drives which player slot.
+#
+# Put it next to xinput1_3.dll (the game's folder). The DLL also looks beside
+# the game .exe, which matters when the DLL lives in a subfolder.
+#
+# Anything you leave out keeps its default; anything you set wins over
+# auto-detection. You can override a single line and let everything else be
+# detected.
+
+# Write virtual-xinput.log next to the DLL. Turn this on first when something
+# is not working: the log records which device went to which slot and the exact
+# mapping that was chosen.
+log: false
+
+# How often the pad is read, in Hz (10-1000). 250 is smooth and cheap; there is
+# rarely a reason to raise it.
+poll_hz: 250
+
+# Rumble. XInputSetState is forwarded to DirectInput force feedback.
+#
+# This is only ever attempted on a pad that actually reports force feedback, and
+# taking it requires claiming the device exclusively - so on a pad without it,
+# leaving this on costs nothing and changes nothing. Turn it off if a device's
+# force feedback misbehaves, or if another program needs the pad at the same
+# time; the device then stays in shared mode.
+#
+# Note that many pads (DualShock 4 among them) rumble only through their own
+# vendor driver, which DirectInput cannot reach. `virtual-xinput-config.exe`
+# will tell you which case you are in.
+rumble: true
+rumble_gain: 1.0     # 0.0 disables, 0.5 halves the strength, 1.0 is full
+
+
+# Deadzones set here apply to every device, unless a device overrides them.
+#
+# Stick deadzones are RADIAL: they measure how far the stick is pushed in any
+# direction, rather than treating X and Y separately. That is what stops a worn
+# stick from drifting diagonally. Values are a fraction of full deflection.
+deadzone:
+  left_stick:  0.15    # raise if the character walks on its own
+  right_stick: 0.15
+  trigger:     0.10
+
+  # Deflection that counts as "fully pushed". Lower it if the stick physically
+  # cannot reach the corners and the game never sees a full sprint.
+  left_stick_max:  1.00
+  right_stick_max: 1.00
+  trigger_max:     1.00
+
+
+devices:
+    # ---------------------------------------------------------------------
+    # "*" matches any controller. `match` is a case-insensitive substring of
+    # the product name, so "wireless" would match "Wireless Controller".
+    # Entries are tried in order; put specific ones above the catch-all.
+    # ---------------------------------------------------------------------
+  - match: "*"
+
+    # XInput player slot, 0-3. Slot 0 is player one, which is what a
+    # single-player game reads. Use -1 (or omit) to hand out slots in the
+    # order Windows enumerates the pads.
+    slot: 0
+
+    # Both of these override the top-level values for this device only.
+    rumble: true
+    rumble_gain: 1.0
+
+    # Per-device deadzones override the block above.
+    deadzone:
+      left_stick:  0.15
+      right_stick: 0.15
+      trigger:     0.10
+
+    # ---------------------------------------------------------------------
+    # Axes. Left side is the XInput control, right side is the DirectInput
+    # source:
+    #
+    #   x y z rx ry rz slider0 slider1   the DirectInput axis names
+    #   -y                               '-' inverts the direction
+    #   z+ / z-                          use only the upper/lower half of an
+    #                                    axis, rescaled to full travel. Needed
+    #                                    when both triggers share one axis.
+    #   button:6                         drive an axis from a digital button
+    #   none                             leave unmapped
+    #
+    # Run virtual-xinput-config.exe and pick "Monitor" to see which axis your
+    # pad actually moves; the names above are what it prints.
+    # ---------------------------------------------------------------------
+    axes:
+      left_x:        x
+      left_y:        -y     # DirectInput Y grows downward, XInput grows up
+      right_x:       z
+      right_y:       -rz
+      left_trigger:  rx
+      right_trigger: ry
+
+    # ---------------------------------------------------------------------
+    # Buttons. Left side is the XInput button, right side is the DirectInput
+    # source:
+    #
+    #   4                a DirectInput button index (they start at 0)
+    #   none             leave unmapped
+    #   pov0:up          a direction on hat 0
+    #   axis:z+@0.5      treat an axis past a threshold as a button press
+    #
+    # A and X are the ones most often wrong: they follow the physical position
+    # on an Xbox pad, so A is the BOTTOM face button and X is the LEFT one.
+    # ---------------------------------------------------------------------
+    buttons:
+      a:              0
+      b:              1
+      x:              2
+      y:              3
+      left_shoulder:  4
+      right_shoulder: 5
+      back:           6
+      start:          7
+      left_thumb:     8
+      right_thumb:    9
+      guide:          none
+
+    # The D-pad. Nearly every pad reports it as a hat, and `pov0` wires up all
+    # four directions at once. If yours uses four separate buttons, delete this
+    # line and set dpad_up / dpad_down / dpad_left / dpad_right under `buttons`
+    # instead.
+    dpad: pov0
+
+
+# -------------------------------------------------------------------------
+# Worked example: DualShock 4 (Windows reports it as "Wireless Controller").
+#
+# Its sticks and triggers are detected correctly with no config, but its face
+# buttons are in PlayStation order, so A/B/X/Y come out rotated. Only the
+# button block actually needs correcting - shown in full here for clarity.
+#
+#  - match: "Wireless Controller"
+#    slot: 0
+#    axes:
+#      left_x:        x
+#      left_y:        -y
+#      right_x:       z
+#      right_y:       -rz
+#      left_trigger:  rx      # L2, a full axis resting at minimum
+#      right_trigger: ry      # R2
+#    buttons:
+#      a:              1      # Cross    (bottom)
+#      b:              2      # Circle   (right)
+#      x:              0      # Square   (left)
+#      y:              3      # Triangle (top)
+#      left_shoulder:  4      # L1
+#      right_shoulder: 5      # R1
+#      back:           8      # Share
+#      start:          9      # Options
+#      left_thumb:     10     # L3
+#      right_thumb:    11     # R3
+#      guide:          12     # PS button
+#    dpad: pov0
+#
+# Two pads, two players - the first entry that matches a device wins:
+#
+#  - match: "Wireless Controller"
+#    slot: 0
+#  - match: "Logitech"
+#    slot: 1
+#
+# To pin one exact physical device rather than any pad sharing its name, use
+# the instance GUID that virtual-xinput-config.exe prints:
+#
+#  - guid: "CEBED830-3AC7-11ED-8001-444553540000"
+#    slot: 0
+# -------------------------------------------------------------------------

@@ -1,0 +1,21 @@
+; Ordinals verified against the genuine Microsoft XInput1_3.dll.
+;
+; Games built with the DirectX SDK link XInput1_3.lib, which imports BY ORDINAL,
+; so these numbers are load-bearing: a mismatch calls the wrong function with a
+; mismatched __stdcall signature and crashes the game. Do not renumber.
+;
+; Note ordinal 1 is DllMain - the real DLL exports it, and everything else is
+; numbered from 2 onwards because of that.
+EXPORTS
+    DllMain                         @1
+    XInputGetState                  @2
+    XInputSetState                  @3
+    XInputGetCapabilities           @4
+    XInputEnable                    @5
+    XInputGetDSoundAudioDeviceGuids @6
+    XInputGetBatteryInformation     @7
+    XInputGetKeystroke              @8
+    XInputGetStateEx                @100 NONAME
+    XInputWaitForGuideButton        @101 NONAME
+    XInputCancelGuideButtonWait     @102 NONAME
+    XInputPowerOffController        @103 NONAME
