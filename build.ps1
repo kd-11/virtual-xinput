@@ -1,6 +1,8 @@
 # Builds both architectures and assembles the dist folder.
 #
 #   .\build.ps1              build, test, and assemble dist\
+#
+# dist\games.yml and dist\profiles\ are the user's, and survive every rebuild.
 #   .\build.ps1 -NoTests     skip the test run
 #   .\build.ps1 -NoAliases   only xinput1_3.dll, no extra XInput version copies
 #   .\build.ps1 -Clean       delete build\ and dist\ first
@@ -18,13 +20,24 @@ $root = $PSScriptRoot
 $dist = Join-Path $root "dist"
 
 # dist is rebuilt from scratch every time so removed files never linger, but the
-# games list belongs to the user and is put back afterwards.
+# game list and the profile library belong to the user and are put back
+# afterwards.
 #
-# This has to be read before ANY deletion, -Clean included, or the user's game
-# library goes with it.
-$gamesFile = Join-Path $dist "games.yml"
+# These have to be saved before ANY deletion, -Clean included, or the user's
+# work goes with them.
+$gamesFile   = Join-Path $dist "games.yml"
+$profilesDir = Join-Path $dist "profiles"
+$stash       = Join-Path ([System.IO.Path]::GetTempPath()) ("vx-dist-stash-" + [guid]::NewGuid())
+
 $savedGames = $null
 if (Test-Path $gamesFile) { $savedGames = Get-Content -Raw $gamesFile }
+
+$savedProfiles = $false
+if (Test-Path $profilesDir) {
+    New-Item -ItemType Directory -Force $stash | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $profilesDir "*") $stash -ErrorAction SilentlyContinue
+    $savedProfiles = $true
+}
 
 if ($Clean) {
     foreach ($d in @((Join-Path $root "build"), $dist)) {
@@ -70,6 +83,12 @@ foreach ($t in $targets) {
 }
 
 if ($savedGames) { Set-Content -Path $gamesFile -Value $savedGames -NoNewline }
+
+if ($savedProfiles) {
+    New-Item -ItemType Directory -Force $profilesDir | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $stash "*") $profilesDir -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $stash -ErrorAction SilentlyContinue
+}
 
 Write-Host ""
 Write-Host "=== dist ===" -ForegroundColor Green

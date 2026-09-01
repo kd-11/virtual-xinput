@@ -1,5 +1,7 @@
 #include "games.h"
 
+#include "profiles.h"
+
 #include "di_device.h"   // Narrow / Widen
 #include "yaml.h"
 
@@ -195,7 +197,25 @@ bool FilesIdentical(const std::wstring& a, const std::wstring& b) {
     return memcmp(&da[0], &db[0], da.size()) == 0;
 }
 
-bool InstallGame(const std::wstring& toolDir, GameEntry& game, std::string& err) {
+// Resolves the game's profile to config text, falling back to the default.
+// LoadProfiles regenerates the default when it is missing, so this cannot come
+// back empty-handed.
+static bool ResolveProfileText(const std::wstring& toolDir, const GameEntry& game,
+                               std::string& text, std::string& err) {
+    ProfileStore store;
+    if (!LoadProfiles(toolDir, store, err)) return false;
+
+    int i = game.profile.empty() ? -1 : store.FindByName(game.profile);
+    if (i < 0) i = store.DefaultIndex();
+    if (i < 0) {
+        err = "no profile to deploy and no default to fall back on";
+        return false;
+    }
+    return ReadTextFile(store.profiles[i].path, text);
+}
+
+bool InstallGame(const std::wstring& toolDir, GameEntry& game, std::string& err,
+                 bool* configWritten) {
     if (!DirectoryExists(game.folder)) {
         err = "game folder does not exist: " + Narrow(game.folder);
         return false;
@@ -226,6 +246,21 @@ bool InstallGame(const std::wstring& toolDir, GameEntry& game, std::string& err)
             return false;
         }
         game.installedFiles.push_back(dlls[i]);
+    }
+
+    // The config is deliberately not added to installedFiles: uninstall leaves
+    // it behind so a mapping someone worked out survives removing the DLLs.
+    if (configWritten) *configWritten = false;
+
+    const std::wstring cfgPath = JoinPath(game.folder, L"virtual-xinput.yml");
+    if (!FileExists(cfgPath)) {
+        std::string text;
+        if (!ResolveProfileText(toolDir, game, text, err)) return false;
+        if (!WriteTextFile(cfgPath, text)) {
+            err = "installed the DLLs but could not write " + Narrow(cfgPath);
+            return false;
+        }
+        if (configWritten) *configWritten = true;
     }
     return true;
 }
@@ -303,6 +338,7 @@ bool LoadGames(const std::wstring& path, GameLibrary& lib, std::string& err) {
         g.folder = Widen(n.Str("folder", ""));
         g.exe    = Widen(n.Str("exe", ""));
         g.arch   = PeArchFromName(n.Str("arch", "unknown"));
+        g.profile = n.Str("profile", "");
 
         if (g.folder.empty()) continue;
         if (g.name.empty()) g.name = Narrow(LeafName(g.folder));
@@ -343,6 +379,9 @@ bool SaveGames(const std::wstring& path, const GameLibrary& lib, std::string& er
             fprintf(f, "    exe:    %s\n", QuoteYaml(Narrow(g.exe)).c_str());
         }
         fprintf(f, "    arch:   %s\n", PeArchName(g.arch));
+        if (!g.profile.empty()) {
+            fprintf(f, "    profile: %s\n", QuoteYaml(g.profile).c_str());
+        }
 
         if (!g.installedFiles.empty()) {
             fprintf(f, "    installed:\n");

@@ -6,6 +6,7 @@
 #include "../src/common/di_device.h"
 #include "../src/common/games.h"
 #include "../src/common/mapping.h"
+#include "../src/common/profiles.h"
 #include "../src/common/xinput_defs.h"
 #include "../src/common/yaml.h"
 
@@ -683,6 +684,250 @@ void TestGameLibraryRoundTrip() {
     _wremove(path.c_str());
 }
 
+
+// ---------------------------------------------------------------------------
+// Config emission
+// ---------------------------------------------------------------------------
+
+void TestConfigToYaml() {
+    Section("Config emission: round trips through the parser");
+
+    Config out;
+    out.log    = true;
+    out.pollHz = 125;
+
+    DeviceProfile p;
+    p.match      = "Wireless Controller";
+    p.slot       = 2;
+    p.rumble     = false;
+    p.rumbleGain = 0.5f;
+    p.dz.leftStick    = 0.22f;
+    p.dz.rightStickMax = 0.85f;
+    p.dz.trigger      = 0.07f;
+
+    ParseAxisSpec("-rz", p.axes[XA_RightY]);
+    ParseAxisSpec("z+",  p.axes[XA_LeftTrigger]);
+    ParseButtonSpec("7", p.buttons[XB_A]);
+    ParseButtonSpec("pov0:left", p.buttons[XB_DpadLeft]);
+    ParseButtonSpec("axis:x-@0.60", p.buttons[XB_Back]);
+    out.devices.push_back(p);
+
+    const std::string text = ConfigToYaml(out);
+
+    Config in;
+    Check(ConfigParse(text, in), "emitted config parses", in.error.c_str());
+    if (in.devices.empty()) { Check(false, "no device block survived"); return; }
+
+    const DeviceProfile& q = in.devices[0];
+    Check(in.log, "log survives");
+    CheckEqInt(in.pollHz, 125, "poll_hz survives");
+    Check(q.match == "Wireless Controller", "match survives");
+    CheckEqInt(q.slot, 2, "slot survives");
+    Check(q.rumble == false, "rumble false survives");
+    CheckNear(q.rumbleGain, 0.5f, 0.001f, "rumble_gain survives");
+    CheckNear(q.dz.leftStick, 0.22f, 0.001f, "deadzone survives");
+    CheckNear(q.dz.rightStickMax, 0.85f, 0.001f, "saturation survives");
+    CheckNear(q.dz.trigger, 0.07f, 0.001f, "trigger deadzone survives");
+
+    Check(q.axes[XA_RightY].axis == DiAxis::Rz && q.axes[XA_RightY].invert,
+          "inverted axis survives");
+    Check(q.axes[XA_LeftTrigger].axis == DiAxis::Z &&
+              q.axes[XA_LeftTrigger].half == AxisHalf::Positive,
+          "half-axis trigger survives");
+    CheckEqInt(q.buttons[XB_A].button, 7, "button index survives");
+    Check(q.buttons[XB_DpadLeft].kind == ButtonMapping::Kind::Pov &&
+              q.buttons[XB_DpadLeft].povMask == VX_GAMEPAD_DPAD_LEFT,
+          "pov binding survives");
+    Check(q.buttons[XB_Back].kind == ButtonMapping::Kind::Axis &&
+              !q.buttons[XB_Back].axisPositive,
+          "axis-as-button survives");
+
+    // A profile with no device block is the auto-detecting default. The parser
+    // deliberately synthesises one wildcard profile for it - a file that only
+    // sets deadzones still needs something to apply them to - so the guarantee
+    // is that it comes back as exactly one auto-everything entry.
+    Config empty;
+    const std::string emptyText = ConfigToYaml(empty);
+    Config back;
+    Check(ConfigParse(emptyText, back), "device-less config parses", back.error.c_str());
+    CheckEqInt((long long)back.devices.size(), 1, "device-less config yields one profile");
+    if (!back.devices.empty()) {
+        Check(back.devices[0].match == "*", "and it matches any pad");
+        Check(back.devices[0].autoAxes && back.devices[0].autoButtons,
+              "and leaves axes and buttons to auto-detection");
+        CheckNear(back.devices[0].dz.leftStick, 0.15f, 0.001f,
+                  "and carries the deadzones the file wrote out");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Profiles
+// ---------------------------------------------------------------------------
+
+void RemoveTree(const std::wstring& dir) {
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(JoinPath(dir, L"*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            const std::wstring name = fd.cFileName;
+            if (name == L"." || name == L"..") continue;
+            const std::wstring full = JoinPath(dir, name);
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) RemoveTree(full);
+            else                                               DeleteFileW(full.c_str());
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    RemoveDirectoryW(dir.c_str());
+}
+
+void TestProfileSlugs() {
+    Section("Profiles: slugs");
+
+    Check(ProfileSlug("Default") == "default", "simple name");
+    Check(ProfileSlug("DualShock 4") == "dualshock-4", "spaces become dashes");
+    Check(ProfileSlug("Baldur's Gate!!") == "baldur-s-gate", "punctuation folded, no trailing dash");
+    Check(ProfileSlug("  ") == "profile", "a name with nothing usable still yields a filename");
+    Check(ProfileSlug("A---B") == "a-b", "runs of punctuation collapse");
+}
+
+void TestProfileStore() {
+    Section("Profiles: store");
+
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    const std::wstring toolDir = JoinPath(tmp, L"vx_profile_test");
+    RemoveTree(toolDir);
+    CreateDirectoryW(toolDir.c_str(), nullptr);
+
+    ProfileStore st;
+    std::string  err;
+
+    Check(LoadProfiles(toolDir, st, err), "loads an empty folder", err.c_str());
+    Check(DirectoryExists(ProfilesDir(toolDir)), "creates the profiles folder");
+    CheckEqInt((long long)st.profiles.size(), 1, "the default is created");
+    Check(st.DefaultIndex() >= 0, "a default exists");
+    Check(st.profiles[st.DefaultIndex()].name == std::string(kDefaultProfileName),
+          "the default is named");
+
+    // The default must be the auto-detecting config, or install would deploy a
+    // mapping derived from whatever pad happened to be plugged in.
+    Config def;
+    Check(ReadProfile(st.profiles[st.DefaultIndex()], def, err), "default parses", err.c_str());
+    CheckEqInt((long long)def.devices.size(), 1, "the default yields one profile");
+    Check(!def.devices.empty() && def.devices[0].match == "*",
+          "the default matches any pad");
+    Check(!def.devices.empty() && def.devices[0].autoAxes && def.devices[0].autoButtons,
+          "the default leaves the mapping to auto-detection");
+
+    // Saving.
+    Config cfg;
+    DeviceProfile p;
+    p.match = "Test Pad";
+    p.slot  = 1;
+    ParseButtonSpec("3", p.buttons[XB_A]);
+    cfg.devices.push_back(p);
+
+    Check(SaveProfile(st, "My Pad", cfg, err), "saves a new profile", err.c_str());
+    CheckEqInt((long long)st.profiles.size(), 2, "the new profile is listed");
+
+    const int mine = st.FindByName("My Pad");
+    Check(mine >= 0, "found by display name");
+    if (mine >= 0) {
+        Check(st.profiles[mine].slug == "my-pad", "slug derived from the name");
+        Config back;
+        Check(ReadProfile(st.profiles[mine], back, err), "reads back", err.c_str());
+        Check(!back.devices.empty() && back.devices[0].match == "Test Pad",
+              "content survives the round trip");
+        CheckEqInt(back.devices.empty() ? -1 : back.devices[0].buttons[XB_A].button, 3,
+                   "binding survives the round trip");
+    }
+
+    // Saving the same name again replaces rather than accumulating.
+    Check(SaveProfile(st, "My Pad", cfg, err), "overwrites by name", err.c_str());
+    CheckEqInt((long long)st.profiles.size(), 2, "no duplicate created");
+
+    // Two display names that slug identically must not overwrite each other.
+    Check(SaveProfile(st, "My  Pad!", cfg, err), "saves a slug-colliding name", err.c_str());
+    CheckEqInt((long long)st.profiles.size(), 3, "collision produced a separate file");
+    const int other = st.FindByName("My  Pad!");
+    Check(other >= 0 && st.profiles[other].slug != "my-pad",
+          "collision resolved with a distinct slug");
+
+    // Duplicate and rename.
+    Check(DuplicateProfile(st, "My Pad", "Copy Of Mine", err), "duplicates", err.c_str());
+    Check(st.FindByName("Copy Of Mine") >= 0, "the duplicate is listed");
+    Check(!DuplicateProfile(st, "My Pad", "Copy Of Mine", err),
+          "refuses to duplicate onto an existing name");
+
+    Check(RenameProfile(st, "Copy Of Mine", "Renamed", err), "renames", err.c_str());
+    Check(st.FindByName("Renamed") >= 0, "the new name is listed");
+    Check(st.FindByName("Copy Of Mine") < 0, "the old name is gone");
+
+    // The default is protected on every path that could remove it.
+    Check(!DeleteProfile(st, kDefaultProfileName, err), "refuses to delete the default");
+    Check(!RenameProfile(st, kDefaultProfileName, "Something", err),
+          "refuses to rename the default");
+
+    Check(DeleteProfile(st, "Renamed", err), "deletes an ordinary profile", err.c_str());
+    Check(st.FindByName("Renamed") < 0, "the deleted profile is gone");
+
+    // Deleting the default's file by hand must not leave the store without one,
+    // or installing into a game would have nothing to deploy.
+    const int di = st.DefaultIndex();
+    if (di >= 0) DeleteFileW(st.profiles[di].path.c_str());
+    Check(LoadProfiles(toolDir, st, err), "reloads after the default is deleted", err.c_str());
+    Check(st.DefaultIndex() >= 0, "the default is regenerated when missing");
+
+    RemoveTree(toolDir);
+}
+
+void TestGameProfileField() {
+    Section("Game library: profile assignment");
+
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    const std::wstring path = JoinPath(tmp, L"vx_games_profile_test.yml");
+
+    GameLibrary out;
+
+    GameEntry a;
+    a.name    = "With Profile";
+    a.folder  = L"C:\\Games\\A";
+    a.arch    = PeArch::X86;
+    a.profile = "My Pad";
+    out.games.push_back(a);
+
+    GameEntry b;
+    b.name   = "Without Profile";
+    b.folder = L"C:\\Games\\B";
+    b.arch   = PeArch::X64;
+    out.games.push_back(b);
+
+    std::string err;
+    Check(SaveGames(path, out, err), "saves", err.c_str());
+
+    GameLibrary in;
+    Check(LoadGames(path, in, err), "loads", err.c_str());
+    if (in.games.size() != 2) { Check(false, "two games survive"); _wremove(path.c_str()); return; }
+
+    Check(in.games[0].profile == "My Pad", "profile name survives");
+    Check(in.games[1].profile.empty(), "an unset profile stays empty, meaning the default");
+
+    // A library written before profiles existed has no profile key at all and
+    // must still load.
+    const std::string legacy =
+        "games:\n"
+        "  - name:   'Old Entry'\n"
+        "    folder: 'C:\\Games\\Old'\n"
+        "    arch:   x86\n";
+    GameLibrary legacyLib;
+    YamlNode    root;
+    std::string yerr;
+    Check(YamlParse(legacy, root, yerr), "legacy library parses", yerr.c_str());
+
+    _wremove(path.c_str());
+}
+
 } // namespace
 
 int main() {
@@ -703,6 +948,10 @@ int main() {
     TestPathHelpers();
     TestExeArchDetection();
     TestGameLibraryRoundTrip();
+    TestConfigToYaml();
+    TestProfileSlugs();
+    TestProfileStore();
+    TestGameProfileField();
 
     printf("\n----------------------------------------\n");
     if (g_failures == 0) {

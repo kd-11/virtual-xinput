@@ -45,6 +45,8 @@ add_library(vx_common STATIC
     src/common/log.cpp
     src/common/mapping.cpp
     src/common/pad_manager.cpp
+    src/common/profiles.cpp
+    src/common/strutil.cpp
     src/common/yaml.cpp
 )
 target_include_directories(vx_common PUBLIC src/common)

@@ -1,8 +1,8 @@
 # Spec: GUI configurator
 
-Status: **phases 1–3 built, 4–6 outstanding.** The window, the live pad
-preview and click-to-bind are in `src/gui/`. Profiles, the Games tab and saving
-from the GUI are not. See *Phases* at the end for what is left.
+Status: **phases 1–4 built, 5–6 outstanding.** The window, the live pad
+preview, click-to-bind and the profile store are in. The Games tab and
+divergence detection are not. See *Phases* at the end for what is left.
 
 The console configurator works and will stay. What it cannot do well is show
 you a control moving while you decide what to bind it to — and that is most of
@@ -206,14 +206,21 @@ aspirational: there is no state in which installing has nothing to deploy.
 
 ### Deployment
 
-**Install always writes a config.** Currently `InstallGame` copies DLLs and
-nothing else, and writing a mapping is a separate menu action that is easy to
-forget. That changes: install copies the payload *and* writes the assigned
-profile to `<game>/virtual-xinput.yml`, defaulting to the default profile when
-the game has no assignment. Games are never installed configuration-less.
+**Install always writes a config.** `InstallGame` used to copy DLLs and nothing
+else, with "write the mapping into a game folder" a separate menu action that
+was easy to forget. It now copies the payload *and* writes the assigned profile
+to `<game>/virtual-xinput.yml`, falling back to the default when the game has no
+assignment. Games are never installed configuration-less.
 
-`GameEntry` gains a `profile` field; `games.yml` gains a `profile:` key, absent
-meaning default, so existing files load unchanged.
+`GameEntry` gained a `profile` field and `games.yml` a `profile:` key; absent
+means default, so libraries written before profiles existed load unchanged.
+
+One deliberate narrowing of the original plan: **an existing
+`virtual-xinput.yml` is left alone rather than overwritten.** Someone may have
+tuned it by hand, and no copy of that exists anywhere else. Until divergence
+detection lands in phase 5 there is no way to ask which one the user wants, and
+the safe answer when you cannot ask is not to destroy anything. Install reports
+which of the two happened.
 
 ### Divergence
 
@@ -286,14 +293,16 @@ passing.
 3. ~~**Binding.**~~ **Done.** Click-to-capture with a queue, resting-position
    inference shared with the console wizard, auto-detect reset, deadzone rings
    drawn over the live dots.
-4. **Profiles.** The store, the default profile, the Profiles tab.
-5. **Games.** Profile assignment, install-writes-config, divergence detection.
+4. ~~**Profiles.**~~ **Done.** The store, the always-present default, the
+   Profiles tab, and saving from the Pad tab. `install-writes-config` was
+   pulled forward from phase 5 because without it profiles were inert.
+5. **Games.** The Games tab, profile assignment from the GUI, divergence
+   detection.
 6. **Polish.** Store/UWP and permission warnings, FF test, README.
 
-Phase 4 is next. Until it lands the GUI can derive a mapping but not save one,
-so the console app is still needed to write a config file — which is the main
-thing that currently keeps both front-ends necessary rather than merely
-available.
+Phase 5 is next. Adding a game, assigning it a profile and installing are all
+still console-only; the GUI can now produce and store a mapping but cannot put
+one into a game folder.
 
 ## Decisions needing sign-off
 

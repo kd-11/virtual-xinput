@@ -2,6 +2,7 @@
 
 #include "../common/detect.h"
 #include "../common/di_device.h"
+#include "../common/profiles.h"
 
 #include "draw_pad.h"
 
@@ -41,16 +42,26 @@ private:
     void CancelCapture();
     void SkipCapture();
 
-    void DrawMenuBar();
     void DrawDeviceBar();
     void DrawPadTab();
     void DrawRawTab();
     void DrawDeviceTab();
+    void DrawProfilesTab();
     void DrawCaptureBanner();
     void DrawMappingTable();
     void DrawDeadzones();
+    void DrawSaveBar();
 
     const char* CurrentPrompt() const;
+
+    // The current mapping as a whole config, ready to be saved as a profile or
+    // written into a game folder.
+    Config CurrentConfig() const;
+
+    void ReloadProfiles();
+    void LoadProfileIntoEditor(int index);
+    void SaveCurrentAs(const std::string& name);
+    void SetStatus(const std::string& text);
 
     DiSystem                di_;
     std::vector<DeviceInfo> devices_;
@@ -68,6 +79,11 @@ private:
     // Devices are re-enumerated periodically so a pad plugged in while the
     // window is open turns up without the user hunting for a refresh button.
     DWORD lastEnumTick_;
+
+    ProfileStore profiles_;
+    int          activeProfile_;     // index in profiles_, or -1 for unsaved
+    char         nameBuf_[64];       // the name field on the Pad tab's save bar
+    std::string  profileError_;      // sticky: a broken store needs to stay visible
 
     std::string status_;
     DWORD       statusTick_;

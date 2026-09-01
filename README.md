@@ -60,6 +60,27 @@ ordinal would call the wrong function otherwise (see *Export ordinals* below).
 They are only loaded if a game actually requests that version. Build with
 `-NoAliases` to get just `xinput1_3.dll`.
 
+## Profiles
+
+A profile is a **complete `virtual-xinput.yml`**, stored under a name in a
+`profiles` folder beside the configurator. Not a fragment and not a second
+format — which means a profile can be inspected, hand-edited, copied out, or
+dropped into a game by hand, and there is one config schema in the project
+rather than two to keep in step.
+
+One file per profile, so a profile broken by hand takes only itself down.
+
+`Default` always exists. It carries deadzones and **no device block at all**, so
+every pad is auto-detected — the configuration that works on the widest range of
+hardware. It cannot be deleted or overwritten from the UI and is written back if
+it goes missing. That is what makes "there is always something to deploy" true
+rather than merely likely.
+
+**Installing into a game always writes a config.** Whichever profile the game is
+assigned, or `Default` if none. An existing `virtual-xinput.yml` in the game
+folder is *left alone* rather than overwritten — it may have been tuned by hand,
+and no other copy of it exists.
+
 ## Managing games
 
 The configurator keeps a list of game folders and installs or removes the tool
@@ -147,9 +168,11 @@ Before each prompt the controller's resting position is sampled, which is the
 step that tells a trigger resting at its minimum apart from one sharing an axis
 with the other trigger. Leave the pad alone while the bar fills.
 
-Binding is not yet saved from this window — use **Save** in the console
-configurator, or the Games menu there, to write `virtual-xinput.yml`. Profiles
-and game management are the next piece of work; see
+- **Profiles** — named mappings kept beside the configurator, in a `profiles`
+  folder. Save the current mapping from the Pad tab; load, duplicate or delete
+  from here.
+
+Adding and installing games is still console-only; see
 [docs/gui-configurator-spec.md](docs/gui-configurator-spec.md).
 
 ## The console configurator's interactive menu

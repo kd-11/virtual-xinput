@@ -130,6 +130,21 @@ bool ParseAxisSpec(const std::string& spec, AxisMapping& out);
 // Parses one button spec, e.g. "3", "none", "axis:z+@0.5", "pov0:up".
 bool ParseButtonSpec(const std::string& spec, ButtonMapping& out);
 
+// Renders a GUID in the brace-less form the config parser accepts. It lives
+// here rather than beside DirectInput because it is the inverse of the GUID
+// parsing above, and the config writer needs it without pulling in dinput.h.
+std::string GuidToString(const GUID& g);
+
+// Canonical key name for each destination, as written into a config file. The
+// parser accepts several aliases for most of these; this is the one it emits.
+const char* XAxisKey(int slot);
+const char* XButtonKey(int slot);
+
+// Renders a whole config back to YAML, ready to be written next to the DLL.
+// The output parses back to an equivalent Config, which is what makes a profile
+// safe to round-trip through an editor.
+std::string ConfigToYaml(const Config& cfg);
+
 // The exact inverse of the two parsers above. Kept beside them so a change to
 // the syntax cannot be made on one side only, and used both to write config
 // files and to show a mapping in the configurators.

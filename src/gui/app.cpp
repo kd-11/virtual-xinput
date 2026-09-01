@@ -2,6 +2,7 @@
 
 #include "platform.h"
 
+#include "../common/games.h"
 #include "../common/mapping.h"
 
 #include <cstdio>
@@ -67,7 +68,9 @@ void BipolarBar(float v, float width) {
 
 App::App()
     : selected_(-1), dev_(nullptr), polled_(false),
-      lastEnumTick_(0), statusTick_(0) {}
+      lastEnumTick_(0), activeProfile_(-1), statusTick_(0) {
+    nameBuf_[0] = '\0';
+}
 
 App::~App() { Shutdown(); }
 
@@ -78,7 +81,77 @@ bool App::Init(std::string& err) {
     }
     RefreshDevices();
     if (!devices_.empty()) SelectDevice(0);
+
+    // Profiles live beside the executable, not beside the game, so the whole
+    // folder stays portable.
+    wchar_t exePath[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        std::wstring dir(exePath);
+        const size_t sep = dir.find_last_of(L"\\/");
+        if (sep != std::wstring::npos) dir.erase(sep);
+        if (!LoadProfiles(dir, profiles_, profileError_)) {
+            // Not fatal: everything except saving still works, and saying so is
+            // more use than refusing to start.
+            profileError_ = "profiles unavailable - " + profileError_;
+        }
+    }
     return true;
+}
+
+void App::SetStatus(const std::string& text) {
+    status_     = text;
+    statusTick_ = GetTickCount();
+}
+
+void App::ReloadProfiles() {
+    if (profiles_.toolDir.empty()) return;
+    std::string err;
+    if (!LoadProfiles(profiles_.toolDir, profiles_, err)) profileError_ = err;
+}
+
+Config App::CurrentConfig() const {
+    Config cfg;
+    cfg.log    = false;
+    cfg.pollHz = 250;
+
+    DeviceProfile p = profile_;
+    if (dev_) p.match = Narrow(dev_->Info().productName);
+    if (p.slot < 0) p.slot = 0;
+    cfg.devices.push_back(p);
+    return cfg;
+}
+
+void App::LoadProfileIntoEditor(int index) {
+    if (index < 0 || index >= (int)profiles_.profiles.size()) return;
+
+    Config      cfg;
+    std::string err;
+    if (!ReadProfile(profiles_.profiles[index], cfg, err)) {
+        SetStatus(err);
+        return;
+    }
+
+    activeProfile_ = index;
+    snprintf(nameBuf_, sizeof(nameBuf_), "%s", profiles_.profiles[index].name.c_str());
+
+    // A profile with no device block is the auto-detecting default. Loading it
+    // means "go back to auto", not "clear everything".
+    profile_ = cfg.devices.empty() ? DeviceProfile() : cfg.devices[0];
+    if (dev_) BuildAutoProfile(dev_->Caps(), profile_);
+
+    CancelCapture();
+    SetStatus("loaded profile '" + profiles_.profiles[index].name + "'");
+}
+
+void App::SaveCurrentAs(const std::string& name) {
+    std::string err;
+    if (!SaveProfile(profiles_, name, CurrentConfig(), err)) {
+        SetStatus(err);
+        return;
+    }
+    activeProfile_ = profiles_.FindByName(name);
+    SetStatus("saved profile '" + name + "'");
 }
 
 void App::Shutdown() {
@@ -276,6 +349,10 @@ void App::Frame() {
             DrawDeviceTab();
             ImGui::EndTabItem();
         }
+        if (ImGui::BeginTabItem("Profiles")) {
+            DrawProfilesTab();
+            ImGui::EndTabItem();
+        }
         ImGui::EndTabBar();
     }
 
@@ -421,9 +498,11 @@ void App::DrawPadTab() {
         profile_ = DeviceProfile();
         BuildAutoProfile(dev_->Caps(), profile_);
         CancelCapture();
-        status_     = "mapping reset to auto-detect";
-        statusTick_ = GetTickCount();
+        SetStatus("mapping reset to auto-detect");
     }
+
+    ImGui::Spacing();
+    DrawSaveBar();
     ImGui::EndChild();
 
     ImGui::SameLine();
@@ -507,6 +586,146 @@ void App::DrawMappingTable() {
     }
 
     ImGui::EndTable();
+}
+
+void App::DrawSaveBar() {
+    if (profiles_.toolDir.empty()) {
+        ImGui::TextDisabled("Profiles unavailable: could not find the tool folder.");
+        return;
+    }
+
+    ImGui::SeparatorText("Save as a profile");
+
+    ImGui::SetNextItemWidth(220.0f);
+    ImGui::InputTextWithHint("##pname", "profile name", nameBuf_, sizeof(nameBuf_));
+
+    const std::string name = nameBuf_;
+    const int         existing = name.empty() ? -1 : profiles_.FindByName(name);
+    const bool        isDefault = existing >= 0 && profiles_.profiles[existing].isDefault;
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled(name.empty() || isDefault);
+    if (ImGui::Button(existing >= 0 ? "Overwrite" : "Save")) SaveCurrentAs(name);
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    if (isDefault) {
+        // Overwriting it would remove the one configuration guaranteed to work
+        // on unknown hardware, which is the thing install falls back to.
+        ImGui::TextDisabled("the default profile cannot be overwritten");
+    } else if (existing >= 0) {
+        ImGui::TextDisabled("replaces the existing profile");
+    } else if (!name.empty()) {
+        ImGui::TextDisabled("new profile");
+    }
+}
+
+void App::DrawProfilesTab() {
+    ImGui::Spacing();
+
+    if (!profileError_.empty()) {
+        ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s", profileError_.c_str());
+        ImGui::Spacing();
+    }
+    if (profiles_.toolDir.empty()) {
+        ImGui::TextDisabled("No profile folder.");
+        return;
+    }
+
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("Profiles live in %s. Each one is a complete "
+                        "virtual-xinput.yml, so it can be hand-edited or copied "
+                        "into a game folder as it stands.",
+                        Narrow(profiles_.dir).c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+
+    if (ImGui::Button("Reload")) ReloadProfiles();
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%d profile%s", (int)profiles_.profiles.size(),
+                        profiles_.profiles.size() == 1 ? "" : "s");
+    ImGui::Spacing();
+
+    // Deferred so the list is not mutated while it is being drawn.
+    int pendingLoad = -1, pendingDelete = -1, pendingDuplicate = -1;
+
+    const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                  ImGuiTableFlags_SizingStretchProp;
+    if (ImGui::BeginTable("##profiles", 3, flags)) {
+        ImGui::TableSetupColumn("Profile", ImGuiTableColumnFlags_WidthStretch, 0.34f);
+        ImGui::TableSetupColumn("File",    ImGuiTableColumnFlags_WidthStretch, 0.30f);
+        ImGui::TableSetupColumn("",        ImGuiTableColumnFlags_WidthStretch, 0.36f);
+        ImGui::TableHeadersRow();
+
+        for (int i = 0; i < (int)profiles_.profiles.size(); ++i) {
+            const ProfileEntry& e = profiles_.profiles[i];
+            ImGui::PushID(i);
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            if (ImGui::Selectable(e.name.c_str(), i == activeProfile_,
+                                  ImGuiSelectableFlags_SpanAllColumns)) {
+                pendingLoad = i;
+            }
+            if (e.isDefault) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(default)");
+            }
+
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("%s.yml", e.slug.c_str());
+
+            ImGui::TableNextColumn();
+            if (ImGui::SmallButton("Load")) pendingLoad = i;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Duplicate")) pendingDuplicate = i;
+            ImGui::SameLine();
+            ImGui::BeginDisabled(e.isDefault);
+            if (ImGui::SmallButton("Delete")) pendingDelete = i;
+            ImGui::EndDisabled();
+
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+
+    if (pendingLoad >= 0) LoadProfileIntoEditor(pendingLoad);
+
+    if (pendingDuplicate >= 0) {
+        const std::string from = profiles_.profiles[pendingDuplicate].name;
+        std::string       to   = from + " copy";
+        for (int n = 2; profiles_.FindByName(to) >= 0 && n < 100; ++n) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), " copy %d", n);
+            to = from + buf;
+        }
+        std::string err;
+        if (DuplicateProfile(profiles_, from, to, err)) SetStatus("created '" + to + "'");
+        else                                            SetStatus(err);
+    }
+
+    if (pendingDelete >= 0) {
+        const std::string name = profiles_.profiles[pendingDelete].name;
+        std::string       err;
+        if (DeleteProfile(profiles_, name, err)) {
+            if (activeProfile_ == pendingDelete) activeProfile_ = -1;
+            SetStatus("deleted '" + name + "'");
+        } else {
+            SetStatus(err);
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("The default profile");
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 46.0f);
+    ImGui::TextDisabled(
+        "The default carries deadzones and no device block at all, so every pad is "
+        "auto-detected. It cannot be deleted or overwritten and is written back if it "
+        "goes missing, which is what guarantees that installing into a game always has "
+        "a configuration to deploy.");
+    ImGui::PopTextWrapPos();
 }
 
 void App::DrawRawTab() {

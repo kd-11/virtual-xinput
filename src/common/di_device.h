@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "mapping.h"
+#include "strutil.h"
 
 namespace vx {
 
@@ -135,9 +136,5 @@ private:
 // Case-insensitive substring test used to match config entries against product
 // names. An empty or "*" pattern matches everything.
 bool MatchesPattern(const std::wstring& name, const std::string& pattern);
-
-std::string  Narrow(const std::wstring& s);
-std::wstring Widen(const std::string& s);
-std::string  GuidToString(const GUID& g);
 
 } // namespace vx

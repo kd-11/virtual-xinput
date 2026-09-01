@@ -24,6 +24,10 @@ struct GameEntry {
     std::wstring exe;       // filename only, used to detect the architecture
     PeArch       arch = PeArch::Unknown;
 
+    // Which profile to deploy into this folder. Empty means the default, which
+    // is what makes an entry written before profiles existed still install.
+    std::string profile;
+
     // Exactly what we copied in, so uninstalling removes our files and only
     // ours.
     std::vector<std::wstring> installedFiles;
@@ -59,8 +63,19 @@ std::wstring PayloadDir(const std::wstring& toolDir, PeArch arch);
 // time is all it takes to cover games that load a different XInput version.
 std::vector<std::wstring> PayloadDlls(const std::wstring& toolDir, PeArch arch);
 
-// Copies the payload into the game folder and records what was written.
-bool InstallGame(const std::wstring& toolDir, GameEntry& game, std::string& err);
+// Copies the payload into the game folder, records what was written, and
+// deploys the game's profile as virtual-xinput.yml.
+//
+// A game is never installed configuration-less: if `game.profile` names nothing
+// that exists, the default profile is used, and the default is regenerated if
+// it has been deleted.
+//
+// An existing virtual-xinput.yml is left alone rather than overwritten. Someone
+// may have tuned it by hand, and silently replacing that with a profile would
+// destroy work no copy of which exists anywhere else. `configWritten` reports
+// which of the two happened.
+bool InstallGame(const std::wstring& toolDir, GameEntry& game, std::string& err,
+                 bool* configWritten = nullptr);
 
 // Removes the recorded files. When nothing was recorded (a hand-edited or lost
 // library), a file is only deleted if it is byte-identical to our payload, so a
