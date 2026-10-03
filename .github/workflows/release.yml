@@ -1,0 +1,95 @@
+# Builds both architectures with build.ps1, runs the tests, and publishes the
+# dist folder as a zip.
+#
+#   push to main    -> rolling "latest" pre-release, replaced on every push
+#   push a v* tag   -> a permanent release named after the tag
+#   manual run      -> same as a push to main
+#
+# The rolling release keeps a fixed asset name, so this link always gets the
+# newest build:
+#   https://github.com/<owner>/<repo>/releases/download/latest/virtual-xinput.zip
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Two pushes in quick succession would otherwise race to delete and recreate
+# the same "latest" release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # build.ps1 defaults to the VS 2026 generator, which the hosted runner may
+      # not have. Ask vswhere what is installed and name the generator to match.
+      - name: Pick Visual Studio generator
+        id: vs
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $version = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion
+          if (-not $version) { throw "no Visual Studio with the C++ toolset found" }
+          # catalog_productLineVersion is not reliably the year (VS 2026 reports
+          # "18"), so map the major version to the generator's year by hand.
+          $major = $version.Split('.')[0]
+          $year  = @{ "17" = "2022"; "18" = "2026" }[$major]
+          if (-not $year) { throw "unrecognised Visual Studio version $version" }
+          $generator = "Visual Studio $major $year"
+          Write-Host "Using $generator"
+          "generator=$generator" >> $env:GITHUB_OUTPUT
+
+      - name: Build and test
+        run: ./build.ps1 -Verbose -Generator "${{ steps.vs.outputs.generator }}"
+
+      - name: Package
+        id: pkg
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tag = $env:GITHUB_REF_NAME
+            $zip = "virtual-xinput-$tag.zip"
+          } else {
+            $tag = "latest"
+            $zip = "virtual-xinput.zip"
+          }
+          Compress-Archive -Path dist/* -DestinationPath $zip
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+
+      - name: Publish versioned release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.pkg.outputs.tag }}" "${{ steps.pkg.outputs.zip }}" `
+            --title "virtual-xinput ${{ steps.pkg.outputs.tag }}" `
+            --generate-notes
+
+      # Deleting and recreating, rather than uploading over the old asset, moves
+      # the tag to this commit and refreshes the release date and notes.
+      - name: Publish rolling release
+        if: github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes 2>$null
+          $short = "${{ github.sha }}".Substring(0, 7)
+          gh release create latest "${{ steps.pkg.outputs.zip }}" `
+            --target "${{ github.sha }}" `
+            --prerelease `
+            --title "Latest build ($short)" `
+            --notes "Automatic build of $short from main. Replaced on every push; use a versioned release for anything you want to keep."

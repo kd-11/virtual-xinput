@@ -54,6 +54,10 @@ if ($Clean) {
 
 if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
 
+# cmake and compiler output is noise on a good build and the only clue on a bad
+# one, so it is kept but only shown under -Verbose.
+function Out-Build { process { if ($VerbosePreference -ne "SilentlyContinue") { $_ | Out-Host } } }
+
 $aliases = if ($NoAliases) { "OFF" } else { "ON" }
 
 $targets = @(
@@ -66,11 +70,11 @@ foreach ($t in $targets) {
 
     Write-Host ""
     Write-Host "=== Configuring $($t.Name) ===" -ForegroundColor Cyan
-    cmake -S $root -B $buildDir -G $Generator -A $t.Platform -DVX_BUILD_ALIASES=$aliases | Out-Null
+    cmake -S $root -B $buildDir -G $Generator -A $t.Platform -DVX_BUILD_ALIASES=$aliases | Out-Build
     if ($LASTEXITCODE -ne 0) { throw "configure failed for $($t.Name)" }
 
     Write-Host "=== Building $($t.Name) ===" -ForegroundColor Cyan
-    cmake --build $buildDir --config Release | Out-Null
+    cmake --build $buildDir --config Release | Out-Build
     if ($LASTEXITCODE -ne 0) { throw "build failed for $($t.Name)" }
 
     if (-not $NoTests) {
@@ -85,7 +89,7 @@ foreach ($t in $targets) {
     }
 
     Write-Host "=== Installing $($t.Name) ===" -ForegroundColor Cyan
-    cmake --install $buildDir --config Release --prefix $dist | Out-Null
+    cmake --install $buildDir --config Release --prefix $dist | Out-Build
     if ($LASTEXITCODE -ne 0) { throw "install failed for $($t.Name)" }
 }
 
