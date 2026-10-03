@@ -163,7 +163,8 @@ endif()
 #     virtual-xinput-gui.exe       the windowed configurator
 #     virtual-xinput-config.exe    run from anywhere; keeps games.yml beside it
 #     virtual-xinput.yml           reference config
-#     README.md
+#     README.md                    getting started
+#     docs/documentation.md        the full reference, plus docs/images/
 #     x86/xinput1_3.dll            payload the configurator installs into games
 #     x64/xinput1_3.dll
 #
@@ -179,3 +180,8 @@ install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/virtual-xinput.yml
     ${CMAKE_CURRENT_SOURCE_DIR}/README.md
     DESTINATION .)
+
+# The README links into docs/ and shows its screenshots, so both travel with it.
+# Only the user-facing documentation: the design specs in docs/ stay behind.
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/docs/documentation.md DESTINATION docs)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/docs/images DESTINATION docs)
