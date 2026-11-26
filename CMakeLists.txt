@@ -137,6 +137,8 @@ if(VX_BUILD_GUI)
     # vx_common.
     target_link_libraries(virtual-xinput-gui PRIVATE vx_common vx_imgui shell32)
     install(PROGRAMS $<TARGET_FILE:virtual-xinput-gui> DESTINATION .)
+    # MIT requires ImGui's notice to travel with the binary that contains it.
+    install(FILES ${VX_IMGUI_DIR}/LICENSE.txt DESTINATION licenses RENAME imgui.txt)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -164,6 +166,8 @@ endif()
 #     virtual-xinput-config.exe    run from anywhere; keeps games.yml beside it
 #     virtual-xinput.yml           reference config
 #     README.md                    getting started
+#     LICENSE                      this project's MIT license
+#     licenses/imgui.txt           Dear ImGui's MIT license (GUI builds only)
 #     docs/documentation.md        the full reference, plus docs/images/
 #     x86/xinput1_3.dll            payload the configurator installs into games
 #     x64/xinput1_3.dll
@@ -179,6 +183,7 @@ install(PROGRAMS $<TARGET_FILE:virtual-xinput-config> DESTINATION .)
 install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/virtual-xinput.yml
     ${CMAKE_CURRENT_SOURCE_DIR}/README.md
+    ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE
     DESTINATION .)
 
 # The README links into docs/ and shows its screenshots, so both travel with it.

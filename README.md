@@ -206,3 +206,11 @@ Everything else is in the **[full documentation](docs/documentation.md)**:
 - how the wrapper works inside the game, and why
 - caveats and known issues: read these before deciding something is broken
 - building by hand with CMake, and the test suite
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+The windowed configurator uses [Dear ImGui](https://github.com/ocornut/imgui),
+also MIT-licensed; its license is in
+[third_party/imgui/LICENSE.txt](third_party/imgui/LICENSE.txt).
